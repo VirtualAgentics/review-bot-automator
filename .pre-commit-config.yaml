@@ -17,13 +17,13 @@ repos:
       - id: check-ast
 
   - repo: https://github.com/psf/black
-    rev: 25.11.0  # Updated from 25.9.0
+    rev: 25.11.0
     hooks:
       - id: black
         language_version: python3.12
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.6
+    rev: v0.14.7
     hooks:
       - id: ruff
         args:
@@ -33,7 +33,7 @@ repos:
           # - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2
+    rev: v1.19.0
     hooks:
       - id: mypy
         language_version: python3.12
@@ -46,7 +46,7 @@ repos:
           - ruamel.yaml==0.18.16
           - tomli-w==1.2.0
           - pydantic==2.12.5
-          - hypothesis==6.148.2
+          - hypothesis==6.148.6
           - tenacity==9.1.2
           - openai==2.8.1
           - tiktoken==0.12.0
@@ -74,7 +74,7 @@ repos:
         exclude: tests/
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.14.0  # Last version supporting Node 18
+    rev: v0.14.0  # Last version supporting Node 18 (v0.15+ requires Node 20+)
     hooks:
       - id: markdownlint-cli2
         name: markdownlint
