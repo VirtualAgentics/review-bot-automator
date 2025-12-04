@@ -235,10 +235,12 @@ class TestRestoreIndentationEdgeCases:
     """Edge case tests for complete coverage."""
 
     def test_whitespace_only_lines_unchanged(self) -> None:
-        """Replacement with only whitespace-only lines (no content) is unchanged.
+        """When all replacement lines are whitespace-only, return unchanged.
 
-        This covers line 80: when first_content_line is None because all lines
-        are whitespace-only (not empty strings, but contain only spaces/tabs).
+        Tests the behavior when no actual content exists to indent - lines
+        contain only spaces/tabs but no code or text. In this case, the
+        function should return the replacement unchanged since there's
+        nothing meaningful to re-indent.
         """
         original = ["def foo():", "    pass"]
         # Lines with only whitespace - no actual content
@@ -248,9 +250,13 @@ class TestRestoreIndentationEdgeCases:
         assert result == ["   ", "\t", "  \t  "]
 
     def test_multiline_dedented_with_wrong_base(self) -> None:
-        """Multi-line with dedented line and wrong base indent.
+        """When a replacement line is less indented than the detected base, use no relative indent.
 
-        Covers line 107: Line has less indent than base, uses no relative indent.
+        Tests the fallback behavior when a line in the replacement has less
+        indentation than the first content line (the detected base). Since the
+        line's indent doesn't start with the base indent, relative indentation
+        cannot be computed, so the line receives only the expected indent with
+        no additional relative offset.
         """
         original = ["class Foo:", "    def method(self):", "        pass"]
         # First line has 8 spaces (wrong), second line has only 2 spaces
@@ -261,11 +267,9 @@ class TestRestoreIndentationEdgeCases:
             "        return 42",  # Back to 8 spaces
         ]
         result = restore_indentation(original, replacement, 1)
-        # Expected: 4 spaces for first line
-        # Second line: has 2 spaces which doesn't start with 8-space base
-        #              so relative_indent = "", result = "    if True:"
-        # Third line: has 8 spaces which starts with 8-space base
-        #             relative_indent = "", result = "    return 42"
+        # First line: expected 4 spaces, gets re-indented
+        # Second line: 2 spaces doesn't start with 8-space base, no relative indent
+        # Third line: 8 spaces matches base, relative indent is empty
         assert result == [
             "    def method(self):",
             "    if True:",
