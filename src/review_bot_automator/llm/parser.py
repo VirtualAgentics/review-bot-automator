@@ -12,6 +12,13 @@ code changes from CodeRabbit review comments. The parser:
 - Supports cost budget enforcement
 
 The parser is provider-agnostic and works with any LLMProvider implementation.
+
+Public API:
+    UniversalLLMParser: Main parser class for extracting code changes
+    CONFIDENCE_AI_PROMPT: Threshold for AI prompt blocks (0.95)
+    CONFIDENCE_SUGGESTION: Threshold for suggestion blocks (0.92)
+    CONFIDENCE_DIFF_WITH_HUNK: Threshold for diff blocks with hunk headers (0.90)
+    CONFIDENCE_NATURAL_LANGUAGE_MAX: Upper bound for natural language inference (0.75)
 """
 
 from __future__ import annotations
@@ -30,6 +37,14 @@ from review_bot_automator.llm.providers.base import LLMProvider
 from review_bot_automator.security.secret_scanner import SecretScanner
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "CONFIDENCE_AI_PROMPT",
+    "CONFIDENCE_DIFF_WITH_HUNK",
+    "CONFIDENCE_NATURAL_LANGUAGE_MAX",
+    "CONFIDENCE_SUGGESTION",
+    "UniversalLLMParser",
+]
 
 # Pattern to match markdown JSON code fences
 _JSON_FENCE_PATTERN = re.compile(
