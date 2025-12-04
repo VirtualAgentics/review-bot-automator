@@ -182,7 +182,6 @@ class TestRestoreFile:
 
         # Both backup and original don't exist
         result = handler.restore_file(str(tmp_path / "test.txt.backup"), str(tmp_path / "test.txt"))
-
         assert result is False
 
     def test_restore_nonexistent_backup_fails(self, tmp_path: Path) -> None:
