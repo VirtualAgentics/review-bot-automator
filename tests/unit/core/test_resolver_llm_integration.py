@@ -743,3 +743,212 @@ class TestResolverParallelInternals:
         mock_parse.assert_called_once()
         assert any(change.parsing_method == "llm" for change in changes)
         assert any(change.parsing_method == "regex" for change in changes)
+
+
+class TestLineRangeValidation:
+    """Test line range validation and swap logic in parallel/sequential parsing paths."""
+
+    def test_parallel_parsing_swaps_invalid_line_range(self, tmp_path: Path) -> None:
+        """Test that invalid line ranges (start_line > line) are swapped in parallel path.
+
+        Covers resolver.py:286-292 - the line range validation swap logic.
+        Requires 5+ comments to trigger parallel parsing path.
+        """
+        mock_provider = MagicMock()
+        # Return valid parsed change
+        mock_provider.generate.return_value = (
+            '[{"file_path": "test.py", "start_line": 10, "end_line": 20, '
+            '"new_content": "fixed_code", "change_type": "modification", '
+            '"confidence": 0.9, "rationale": "Fixed", "risk_level": "low"}]'
+        )
+
+        parallel_parser = ParallelLLMParser(provider=mock_provider, max_workers=2)
+        resolver = ConflictResolver(workspace_root=tmp_path, llm_parser=parallel_parser)
+
+        # Need 5+ comments to trigger parallel parsing. First comment has invalid line range.
+        comments = [
+            {
+                "path": "test.py",
+                "line": 10,  # end_line
+                "start_line": 50,  # start_line > end_line - INVALID, should be swapped
+                "body": "Fix this function",
+                "html_url": "https://github.com/test/1",
+                "user": {"login": "user1"},
+            },
+            {
+                "path": "test.py",
+                "line": 20,
+                "body": "Fix this too",
+                "html_url": "https://github.com/test/2",
+                "user": {"login": "user2"},
+            },
+            {
+                "path": "test.py",
+                "line": 30,
+                "body": "Another fix",
+                "html_url": "https://github.com/test/3",
+                "user": {"login": "user3"},
+            },
+            {
+                "path": "test.py",
+                "line": 40,
+                "body": "Fourth fix",
+                "html_url": "https://github.com/test/4",
+                "user": {"login": "user4"},
+            },
+            {
+                "path": "test.py",
+                "line": 50,
+                "body": "Fifth fix",
+                "html_url": "https://github.com/test/5",
+                "user": {"login": "user5"},
+            },
+        ]
+
+        # Use parallel_parsing=True to exercise the parallel path
+        changes = resolver.extract_changes_from_comments(comments, parallel_parsing=True)
+
+        # Should extract changes (after swapping line range for first comment)
+        assert len(changes) == 5
+        assert all(c.parsing_method == "llm" for c in changes)
+
+    def test_sequential_parsing_swaps_invalid_line_range(self, tmp_path: Path) -> None:
+        """Test that invalid line ranges are swapped in sequential LLM parsing path.
+
+        Covers resolver.py:533-537 - the line range validation swap logic.
+        """
+        mock_parser = MagicMock(spec=LLMParser)
+        mock_parser.parse_comment.return_value = [
+            ParsedChange(
+                file_path="test.py",
+                start_line=10,
+                end_line=20,
+                new_content="fixed_code",
+                change_type="modification",
+                confidence=0.9,
+                rationale="Fixed",
+                risk_level="low",
+            )
+        ]
+
+        resolver = ConflictResolver(workspace_root=tmp_path, llm_parser=mock_parser)
+
+        # Comment with invalid line range: start_line (100) > line/end_line (10)
+        # This triggers swap logic in _extract_changes_with_llm (sequential path)
+        comments = [
+            {
+                "path": "test.py",
+                "line": 10,  # end_line
+                "start_line": 100,  # start_line > end_line - INVALID, should be swapped
+                "body": "Fix this function with natural language",
+                "html_url": "https://github.com/test/1",
+                "user": {"login": "user1"},
+            }
+        ]
+
+        # Use sequential parsing (default) to exercise _extract_changes_with_llm
+        changes = resolver.extract_changes_from_comments(comments, parallel_parsing=False)
+
+        assert len(changes) == 1
+        assert changes[0].parsing_method == "llm"
+        # Verify parse_comment was called (sequential path)
+        mock_parser.parse_comment.assert_called_once()
+
+    def test_sequential_parsing_with_diff_hunk_logs_header(self, tmp_path: Path) -> None:
+        """Test that diff hunk header is logged when present in sequential path.
+
+        Covers resolver.py:516-517 - the diff hunk header extraction logging.
+        """
+        mock_parser = MagicMock(spec=LLMParser)
+        mock_parser.parse_comment.return_value = [
+            ParsedChange(
+                file_path="test.py",
+                start_line=10,
+                end_line=12,
+                new_content="def fixed():\n    return True",
+                change_type="modification",
+                confidence=0.9,
+                rationale="Fixed function",
+                risk_level="low",
+            )
+        ]
+
+        resolver = ConflictResolver(workspace_root=tmp_path, llm_parser=mock_parser)
+
+        # Comment with diff_hunk - triggers header extraction at resolver.py:516-517
+        comments = [
+            {
+                "path": "test.py",
+                "line": 10,
+                "body": "Fix this function",
+                "diff_hunk": "@@ -8,5 +8,6 @@\n context line\n-old code\n+new code",
+                "html_url": "https://github.com/test/1",
+                "user": {"login": "user1"},
+            }
+        ]
+
+        changes = resolver.extract_changes_from_comments(comments, parallel_parsing=False)
+
+        assert len(changes) == 1
+        assert changes[0].parsing_method == "llm"
+
+    def test_parallel_parsing_with_original_line_fields(self, tmp_path: Path) -> None:
+        """Test parallel parsing handles original_start_line and original_line fields.
+
+        These fields are used when line/start_line are None but original_* fields exist.
+        Requires 5+ comments to trigger parallel parsing path.
+        """
+        mock_provider = MagicMock()
+        mock_provider.generate.return_value = (
+            '[{"file_path": "test.py", "start_line": 5, "end_line": 15, '
+            '"new_content": "fixed", "change_type": "modification", '
+            '"confidence": 0.9, "rationale": "Fixed", "risk_level": "low"}]'
+        )
+
+        parallel_parser = ParallelLLMParser(provider=mock_provider, max_workers=2)
+        resolver = ConflictResolver(workspace_root=tmp_path, llm_parser=parallel_parser)
+
+        # Need 5+ comments for parallel parsing. First uses original_line fields.
+        comments = [
+            {
+                "path": "test.py",
+                "original_line": 15,  # Used when 'line' is missing
+                "original_start_line": 5,  # Used when 'start_line' is missing
+                "body": "Fix this function",
+                "html_url": "https://github.com/test/1",
+                "user": {"login": "user1"},
+            },
+            {
+                "path": "test.py",
+                "line": 20,
+                "body": "Fix this too",
+                "html_url": "https://github.com/test/2",
+                "user": {"login": "user2"},
+            },
+            {
+                "path": "test.py",
+                "line": 30,
+                "body": "Another fix",
+                "html_url": "https://github.com/test/3",
+                "user": {"login": "user3"},
+            },
+            {
+                "path": "test.py",
+                "line": 40,
+                "body": "Fourth fix",
+                "html_url": "https://github.com/test/4",
+                "user": {"login": "user4"},
+            },
+            {
+                "path": "test.py",
+                "line": 50,
+                "body": "Fifth fix",
+                "html_url": "https://github.com/test/5",
+                "user": {"login": "user5"},
+            },
+        ]
+
+        changes = resolver.extract_changes_from_comments(comments, parallel_parsing=True)
+
+        assert len(changes) == 5
+        assert all(c.parsing_method == "llm" for c in changes)
