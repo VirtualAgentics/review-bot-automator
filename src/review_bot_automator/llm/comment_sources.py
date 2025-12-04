@@ -53,7 +53,13 @@ _SUGGESTION_PATTERN: Final[re.Pattern[str]] = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
-# <details>...</details> blocks (non-greedy, outermost)
+# <details>...</details> blocks (non-greedy)
+# NOTE: Nested <details> are NOT supported. The non-greedy `.*?` pattern pairs
+# each opening <details> tag with the FIRST encountered </details> tag, which
+# will break nested structures. For example, in "<details>outer<details>inner
+# </details>more</details>", only "outer<details>inner" is captured, leaving
+# "more</details>" as unparsed text. This is acceptable for CodeRabbit comments
+# which do not use nested collapsible sections.
 _DETAILS_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"<details[^>]*>(.*?)</details>",
     re.DOTALL | re.IGNORECASE,
@@ -524,7 +530,11 @@ def extract_comment_sources(comment_body: str | None) -> CommentSources:
     Note:
         - HTML comments (<!-- ... -->) are stripped before processing
         - Comments larger than 100KB are truncated with a warning
-        - Nested <details> blocks parse outermost level only
+        - Nested <details> blocks are NOT supported: the non-greedy regex
+          pairs each opening <details> tag with the FIRST encountered
+          </details> tag, potentially breaking nested structures (e.g.,
+          "<details>outer<details>inner</details>more</details>" captures
+          only "outer<details>inner", leaving "more</details>" unparsed)
 
     Example:
         >>> sources = extract_comment_sources('''

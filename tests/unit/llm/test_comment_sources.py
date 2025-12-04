@@ -336,6 +336,52 @@ Analysis reasoning here.
         assert DetailsBlockType.AI_PROMPT in types
         assert DetailsBlockType.ANALYSIS_CHAIN in types
 
+    def test_nested_details_limitation_documented(self) -> None:
+        """Test that nested <details> blocks do NOT parse correctly.
+
+        This test documents the intentional limitation: the non-greedy regex
+        pairs each opening <details> tag with the FIRST encountered </details>
+        tag, breaking nested structures.
+
+        For example, in:
+            <details>outer<details>inner</details>more</details>
+
+        Only "outer<details>inner" is captured as content, with "more</details>"
+        left as unparsed text. This is acceptable because CodeRabbit comments
+        do not use nested collapsible sections.
+        """
+        # Nested structure: outer details containing inner details
+        body = """<details>
+<summary>Outer section</summary>
+
+Some outer content
+<details>
+<summary>Inner section</summary>
+
+Inner content here
+
+</details>
+More outer content after inner
+
+</details>"""
+        sources = extract_comment_sources(body)
+
+        # Due to the limitation, only ONE block is extracted (not two properly nested)
+        # The non-greedy regex matches from <details> to the first </details>
+        assert len(sources.details_blocks) == 1
+
+        # The extracted block captures content up to the FIRST </details>
+        # which means it includes the inner <details> opening tag but stops
+        # at the inner </details>, leaving "More outer content..." unparsed
+        block = sources.details_blocks[0]
+        assert block.summary == "Outer section"
+        # Content includes the raw inner <details> tag since it wasn't matched
+        assert "<details>" in block.content
+        assert "Inner section" in block.content
+        # The "More outer content after inner" is NOT in the captured content
+        # because the regex stopped at the first </details>
+        assert "More outer content after inner" not in block.content
+
 
 class TestHTMLCommentStripping:
     """Test HTML comment stripping functionality."""
