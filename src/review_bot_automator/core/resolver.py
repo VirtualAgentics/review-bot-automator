@@ -36,6 +36,7 @@ from review_bot_automator.llm.metrics import LLMMetrics
 from review_bot_automator.llm.parallel_parser import CommentInput, ParallelLLMParser
 from review_bot_automator.security.input_validator import InputValidator
 from review_bot_automator.strategies.priority_strategy import PriorityStrategy
+from review_bot_automator.utils.indentation import restore_indentation
 from review_bot_automator.utils.path_utils import resolve_file_path
 from review_bot_automator.utils.text import normalize_content
 
@@ -1364,6 +1365,9 @@ class ConflictResolver:
                 return False
             if end_idx > len(lines):
                 end_idx = len(lines)
+
+            # Restore indentation if LLM stripped it (Issue #287)
+            replacement = restore_indentation(lines, replacement, start_idx)
 
             new_lines = lines[:start_idx] + replacement + lines[end_idx:]
             new_text = "\n".join(new_lines) + "\n"
