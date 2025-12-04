@@ -40,6 +40,13 @@ _JSON_FENCE_PATTERN = re.compile(
 # Maximum characters to include in AI prompt preview for LLM context
 _AI_PROMPT_PREVIEW_LENGTH = 200
 
+# Confidence thresholds for detected source types (used in prompt context messages)
+# These document the expected confidence levels for different source types
+CONFIDENCE_AI_PROMPT = 0.95  # Highest priority - explicit AI instructions
+CONFIDENCE_SUGGESTION = 0.92  # Explicit code replacement
+CONFIDENCE_DIFF_WITH_HUNK = 0.90  # Diff with @@ headers
+CONFIDENCE_NATURAL_LANGUAGE_MAX = 0.75  # Inferred from text (upper bound)
+
 
 def _strip_json_fences(text: str) -> str:
     r"""Strip markdown code fences from JSON response.
@@ -163,6 +170,18 @@ class UniversalLLMParser(LLMParser):
         Returns:
             Formatted string describing detected blocks for LLM context.
             Returns a fallback message when no structured blocks are detected.
+
+        Example:
+            When AI prompt and diff blocks are detected::
+
+                ✓ 1 AI Prompt block(s) detected - HIGHEST PRIORITY (confidence >= 0.95)
+                  AI Instructions: In src/foo.py around line 50...
+                ✓ 2 diff block(s) detected (with hunk headers)
+
+            When no structured blocks are detected::
+
+                No structured blocks detected. Relying on natural language parsing
+                (lower confidence).
         """
         if not sources.has_any_blocks:
             return (
@@ -175,7 +194,8 @@ class UniversalLLMParser(LLMParser):
         if sources.ai_prompt_blocks:
             count = len(sources.ai_prompt_blocks)
             parts.append(
-                f"✓ {count} AI Prompt block(s) detected - HIGHEST PRIORITY (confidence >= 0.95)"
+                f"✓ {count} AI Prompt block(s) detected - "
+                f"HIGHEST PRIORITY (confidence >= {CONFIDENCE_AI_PROMPT})"
             )
             # Include first AI prompt content preview for context
             first_prompt = sources.ai_prompt_blocks[0]

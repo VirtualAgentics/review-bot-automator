@@ -17,9 +17,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from review_bot_automator.llm.base import LLMParser
+from review_bot_automator.llm.comment_sources import (
+    AIPromptBlock,
+    CommentSources,
+    DiffBlock,
+    SuggestionBlock,
+)
 from review_bot_automator.llm.cost_tracker import CostStatus, CostTracker
 from review_bot_automator.llm.exceptions import LLMCostExceededError, LLMSecretDetectedError
-from review_bot_automator.llm.parser import UniversalLLMParser, _strip_json_fences
+from review_bot_automator.llm.parser import (
+    CONFIDENCE_AI_PROMPT,
+    UniversalLLMParser,
+    _strip_json_fences,
+)
 from review_bot_automator.llm.providers.base import LLMProvider
 
 
@@ -782,3 +792,218 @@ class TestJsonFenceInLLMResponse:
 
         assert len(changes) == 1
         assert changes[0].file_path == "src/test.py"
+
+
+class TestBuildSourceContext:
+    """Test _build_source_context method for source detection context building."""
+
+    def test_no_blocks_returns_fallback_message(self) -> None:
+        """Test fallback message when no structured blocks detected."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        # Create empty CommentSources
+        sources = CommentSources(
+            diff_blocks=(),
+            suggestion_blocks=(),
+            ai_prompt_blocks=(),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "No structured blocks detected" in result
+        assert "natural language parsing" in result
+        assert "lower confidence" in result
+
+    def test_ai_prompt_block_short_content(self) -> None:
+        """Test AI prompt block with short content (no truncation)."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        # Create CommentSources with AI prompt < 200 chars
+        short_content = "In src/foo.py around line 50, rename bar to baz"
+        sources = CommentSources(
+            diff_blocks=(),
+            suggestion_blocks=(),
+            ai_prompt_blocks=(
+                AIPromptBlock(summary="AI Prompt", content=short_content, position=0),
+            ),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "AI Prompt block(s) detected" in result
+        assert f"confidence >= {CONFIDENCE_AI_PROMPT}" in result
+        assert short_content in result
+        assert "..." not in result  # No truncation
+
+    def test_ai_prompt_block_long_content_truncated(self) -> None:
+        """Test AI prompt block with long content gets truncated."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        # Create CommentSources with AI prompt > 200 chars
+        long_content = "x" * 250  # Longer than _AI_PROMPT_PREVIEW_LENGTH (200)
+        sources = CommentSources(
+            diff_blocks=(),
+            suggestion_blocks=(),
+            ai_prompt_blocks=(
+                AIPromptBlock(summary="AI Prompt", content=long_content, position=0),
+            ),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "AI Prompt block(s) detected" in result
+        assert "..." in result  # Content was truncated
+        assert long_content not in result  # Full content not present
+
+    def test_ai_prompt_block_empty_content(self) -> None:
+        """Test AI prompt block with empty content doesn't show instructions."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        sources = CommentSources(
+            diff_blocks=(),
+            suggestion_blocks=(),
+            ai_prompt_blocks=(AIPromptBlock(summary="AI Prompt", content="", position=0),),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "AI Prompt block(s) detected" in result
+        assert "AI Instructions:" not in result  # Empty content not shown
+
+    def test_suggestion_blocks_detected(self) -> None:
+        """Test suggestion blocks are included in context."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        sources = CommentSources(
+            diff_blocks=(),
+            suggestion_blocks=(
+                SuggestionBlock(content="new code", position=0, option_label=None),
+                SuggestionBlock(content="more code", position=50, option_label="Option 1"),
+            ),
+            ai_prompt_blocks=(),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "2 suggestion block(s) detected" in result
+
+    def test_diff_blocks_with_hunk_headers(self) -> None:
+        """Test diff blocks with hunk headers."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        sources = CommentSources(
+            diff_blocks=(
+                DiffBlock(content="@@ -1,2 +1,3 @@\n-old\n+new", position=0, has_hunk_header=True),
+            ),
+            suggestion_blocks=(),
+            ai_prompt_blocks=(),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "1 diff block(s) detected" in result
+        assert "(with hunk headers)" in result
+
+    def test_diff_blocks_without_hunk_headers(self) -> None:
+        """Test diff blocks without hunk headers."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        sources = CommentSources(
+            diff_blocks=(DiffBlock(content="-old\n+new", position=0, has_hunk_header=False),),
+            suggestion_blocks=(),
+            ai_prompt_blocks=(),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "1 diff block(s) detected" in result
+        assert "(with hunk headers)" not in result
+
+    def test_multiple_block_types_combined(self) -> None:
+        """Test context with multiple block types."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider)
+
+        sources = CommentSources(
+            diff_blocks=(
+                DiffBlock(content="@@ -1 +1 @@\n-old\n+new", position=0, has_hunk_header=True),
+                DiffBlock(content="-foo\n+bar", position=50, has_hunk_header=False),
+            ),
+            suggestion_blocks=(
+                SuggestionBlock(content="suggestion", position=100, option_label=None),
+            ),
+            ai_prompt_blocks=(AIPromptBlock(summary="AI", content="instructions", position=150),),
+            details_blocks=(),
+            html_comments_stripped=0,
+        )
+
+        result = parser._build_source_context(sources)
+
+        assert "AI Prompt block(s) detected" in result
+        assert "suggestion block(s) detected" in result
+        assert "diff block(s) detected" in result
+        # Should have hunk headers note since at least one diff has them
+        assert "(with hunk headers)" in result
+
+
+class TestParseCommentSourceDetection:
+    """Test source detection integration in parse_comment."""
+
+    def test_parse_comment_logs_ai_prompt_detection(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test that AI prompt detection is logged."""
+        import logging
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.return_value = """[
+            {
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "renamed_function()",
+                "change_type": "modification",
+                "confidence": 0.95,
+                "rationale": "AI prompt instructed rename",
+                "risk_level": "low"
+            }
+        ]"""
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider)
+
+        # Comment body with AI prompt block
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+In src/test.py around line 50, rename function foo to renamed_function.
+
+</details>
+"""
+        with caplog.at_level(logging.INFO):
+            parser.parse_comment(
+                comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+            )
+
+        # Check that AI prompt detection was logged
+        assert any("AI Prompt block detected" in record.message for record in caplog.records)
