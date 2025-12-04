@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 
 from review_bot_automator.llm.base import LLMParser, ParsedChange
@@ -28,6 +29,37 @@ from review_bot_automator.llm.providers.base import LLMProvider
 from review_bot_automator.security.secret_scanner import SecretScanner
 
 logger = logging.getLogger(__name__)
+
+# Pattern to match markdown JSON code fences
+_JSON_FENCE_PATTERN = re.compile(
+    r"^```(?:json)?\s*\n(.*?)\n```\s*$",
+    re.DOTALL,
+)
+
+
+def _strip_json_fences(text: str) -> str:
+    r"""Strip markdown code fences from JSON response.
+
+    LLMs sometimes wrap JSON responses in ```json ... ``` markers despite
+    being asked not to. This function extracts the JSON content.
+
+    Args:
+        text: Raw text that may contain markdown code fences.
+
+    Returns:
+        The JSON content with fences stripped, or original text if no fences found.
+
+    Example:
+        >>> _strip_json_fences("```json\\n[{...}]\\n```")
+        '[{...}]'
+        >>> _strip_json_fences("[{...}]")
+        '[{...}]'
+    """
+    text = text.strip()
+    match = _JSON_FENCE_PATTERN.match(text)
+    if match:
+        return match.group(1).strip()
+    return text
 
 
 class UniversalLLMParser(LLMParser):
@@ -118,7 +150,11 @@ class UniversalLLMParser(LLMParser):
         self,
         comment_body: str,
         file_path: str | None = None,
-        line_number: int | None = None,
+        # TODO(#294): Remove line_number once all callers migrate to start_line/end_line
+        line_number: int | None = None,  # Deprecated, use end_line instead
+        *,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> list[ParsedChange]:
         """Parse comment using LLM to extract code changes.
 
@@ -132,7 +168,10 @@ class UniversalLLMParser(LLMParser):
         Args:
             comment_body: Raw comment text from GitHub (markdown format)
             file_path: Optional file path for context (helps LLM with ambiguous comments)
-            line_number: Optional line number where comment was posted
+            line_number: Deprecated - use end_line instead. Will be removed in future version.
+                See https://github.com/VirtualAgentics/review-bot-automator/issues/294
+            start_line: Start of the diff range (from GitHub start_line field)
+            end_line: End of the diff range (from GitHub line field)
 
         Returns:
             List of ParsedChange objects meeting confidence threshold.
@@ -183,17 +222,41 @@ class UniversalLLMParser(LLMParser):
             )
 
         try:
-            # Build prompt with context
+            # TODO(#294): Remove backward compat logic once line_number is removed
+            # Handle backward compatibility: line_number maps to end_line
+            # Use 0 as sentinel for "unknown" to maintain consistent integer typing
+            # in the prompt template (0 is invalid for 1-indexed line numbers)
+            effective_start = start_line if start_line is not None else 0
+            effective_end = (
+                end_line
+                if end_line is not None
+                else (line_number if line_number is not None else 0)
+            )
+
+            # Build prompt with context (now includes start_line and end_line)
             prompt = PARSE_COMMENT_PROMPT.format(
                 comment_body=comment_body,
                 file_path=file_path or "unknown",
-                line_number=line_number or "unknown",
+                start_line=effective_start,
+                end_line=effective_end,
             )
 
-            logger.debug(
-                f"Parsing comment: file={file_path}, line={line_number}, "
-                f"body_length={len(comment_body)}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Parsing comment: file=%s, start_line=%s, end_line=%s, body_length=%d",
+                    file_path,
+                    effective_start,
+                    effective_end,
+                    len(comment_body),
+                )
+
+                # Log the context section of the prompt (Issue #285 investigation)
+                # Extract just the context part to see what the LLM receives
+                context_start_idx = prompt.find("## Context Information")
+                context_end_idx = prompt.find("## Comment Body")
+                if context_start_idx != -1 and context_end_idx != -1:
+                    context_section = prompt[context_start_idx:context_end_idx].strip()
+                    logger.debug("Prompt context section:\n%s", context_section)
 
             # Track cost before call to calculate incremental cost
             previous_cost = self.provider.get_total_cost() if self.cost_tracker else 0.0
@@ -213,15 +276,18 @@ class UniversalLLMParser(LLMParser):
                     if warning_msg:
                         logger.warning(warning_msg)
 
-            logger.debug(f"LLM response length: {len(response)} characters")
+            logger.debug("LLM response length: %d characters", len(response))
+
+            # Strip markdown code fences if present (LLMs sometimes add them)
+            json_text = _strip_json_fences(response)
 
             # Parse JSON response
             try:
-                changes_data = json.loads(response)
+                changes_data = json.loads(json_text)
             except json.JSONDecodeError as e:
                 logger.error(
-                    f"LLM returned invalid JSON: {response[:200]}... "
-                    f"(truncated, total {len(response)} chars)"
+                    f"LLM returned invalid JSON: {json_text[:200]}... "
+                    f"(truncated, total {len(json_text)} chars)"
                 )
                 raise RuntimeError(f"Invalid JSON from LLM: {e}") from e
 
@@ -248,9 +314,14 @@ class UniversalLLMParser(LLMParser):
 
                     parsed_changes.append(change)
                     logger.debug(
-                        f"Parsed change {idx+1}/{len(changes_data)}: "
-                        f"{change.file_path}:{change.start_line}-{change.end_line} "
-                        f"(confidence={change.confidence:.2f}, risk={change.risk_level})"
+                        "Parsed change %d/%d: %s:%d-%d (confidence=%.2f, risk=%s)",
+                        idx + 1,
+                        len(changes_data),
+                        change.file_path,
+                        change.start_line,
+                        change.end_line,
+                        change.confidence,
+                        change.risk_level,
                     )
 
                 except (TypeError, ValueError) as e:

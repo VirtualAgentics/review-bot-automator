@@ -143,6 +143,32 @@ class ConflictResolver:
         content_str = f"{path}:{start}:{end}:{normalized}"
         return hashlib.sha256(content_str.encode()).hexdigest()[:16]
 
+    def _normalize_line_range(
+        self, start_line: int | None, end_line: int | None, path: str
+    ) -> tuple[int | None, int | None]:
+        """Normalize line range, swapping if start > end.
+
+        GitHub API sometimes returns malformed line ranges where start_line > line (end).
+        This method ensures the range is valid by swapping if needed.
+
+        Args:
+            start_line: Start of the line range (may be None)
+            end_line: End of the line range (may be None)
+            path: File path for logging context
+
+        Returns:
+            Tuple of (start_line, end_line), swapped if start > end
+        """
+        if start_line is not None and end_line is not None and start_line > end_line:
+            self.logger.warning(
+                "Invalid line range for %s: start_line=%d > end_line=%d, swapping",
+                path,
+                start_line,
+                end_line,
+            )
+            return end_line, start_line
+        return start_line, end_line
+
     def extract_changes_from_comments(
         self,
         comments: list[dict[str, Any]],
@@ -279,13 +305,18 @@ class ConflictResolver:
                 path = comment.get("path")
                 body = comment.get("body", "")
                 line = comment.get("line") or comment.get("original_line")
+                start_line = comment.get("start_line") or comment.get("original_start_line")
 
                 if path and body and line:
+                    # Validate line range ordering if both are present
+                    start_line, line = self._normalize_line_range(start_line, line, path)
                     valid_comments.append(
                         CommentInput(
                             body=body,
                             file_path=path,
-                            line_number=line,
+                            line_number=line,  # TODO(#294): Deprecated, use end_line
+                            start_line=start_line,
+                            end_line=line,
                         )
                     )
                     comment_indices.append(idx)
@@ -485,17 +516,58 @@ class ConflictResolver:
             return []
 
         # Extract line context from comment
-        line = comment.get("line") or comment.get("original_line")
-        if not line:
+        # TODO(#285): Remove verbose line field logging after Issue #285 is confirmed fixed
+        start_line = comment.get("start_line")
+        original_start_line = comment.get("original_start_line")
+        line = comment.get("line")
+        original_line = comment.get("original_line")
+        diff_hunk = comment.get("diff_hunk")
+
+        self.logger.debug(
+            f"GitHub comment line fields for {path}: "
+            f"start_line={start_line}, line={line}, "
+            f"original_start_line={original_start_line}, original_line={original_line}, "
+            f"diff_hunk_present={diff_hunk is not None}"
+        )
+        if diff_hunk:
+            # Extract just the @@ header for logging
+            hunk_header = diff_hunk.split("\n")[0] if diff_hunk else "N/A"
+            self.logger.debug(f"Diff hunk header: {hunk_header}")
+
+        effective_line = line or original_line
+        if not effective_line:
             return []
 
+        # Calculate effective start and end lines for LLM context
+        effective_start = start_line or original_start_line
+        effective_end = line or original_line
+
+        # Validate line range ordering if both are present
+        effective_start, effective_end = self._normalize_line_range(
+            effective_start, effective_end, path
+        )
+
+        self.logger.debug(
+            f"Passing to LLM parser: file_path={path}, "
+            f"start_line={effective_start}, end_line={effective_end}"
+        )
+
         try:
-            # Parse comment with LLM
+            # Parse comment with LLM - pass both start and end line for accurate context
             parsed_changes = self.llm_parser.parse_comment(
                 comment_body=body,
                 file_path=path,
-                line_number=line,
+                start_line=effective_start,
+                end_line=effective_end,
             )
+
+            # DEBUG: Log LLM returned line numbers (Issue #285 investigation)
+            for idx, pc in enumerate(parsed_changes):
+                self.logger.debug(
+                    f"LLM returned change {idx+1}: "
+                    f"start_line={pc.start_line}, end_line={pc.end_line}, "
+                    f"confidence={pc.confidence:.2f}"
+                )
 
             # Convert ParsedChange objects to Change objects
             changes = []
@@ -508,7 +580,8 @@ class ConflictResolver:
 
             if changes:
                 self.logger.info(
-                    f"LLM extracted {len(changes)} change(s) from comment on {path}:{line}"
+                    f"LLM extracted {len(changes)} change(s) from comment on "
+                    f"{path}:{effective_end}"
                 )
 
             return changes

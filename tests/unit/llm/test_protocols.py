@@ -104,6 +104,9 @@ class TestLLMParserABC:
                 comment_body: str,
                 file_path: str | None = None,
                 line_number: int | None = None,
+                *,
+                start_line: int | None = None,
+                end_line: int | None = None,
             ) -> list[ParsedChange]:
                 return []
 
@@ -123,6 +126,9 @@ class TestLLMParserABC:
                 comment_body: str,
                 file_path: str | None = None,
                 line_number: int | None = None,
+                *,
+                start_line: int | None = None,
+                end_line: int | None = None,
             ) -> list[ParsedChange]:
                 return []
 

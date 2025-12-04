@@ -86,7 +86,7 @@ jobs:
           python -m pip install -e . --no-deps
 
       - name: Run tests
-        run: pytest tests/ --cov=src --cov-report=xml --cov-report=html --cov-report=term-missing --cov-fail-under=80
+        run: pytest tests/ --cov=src --cov-report=xml --cov-report=html --cov-report=term-missing --cov-fail-under=90
 
       - name: Generate coverage summary
         if: always()
@@ -118,10 +118,10 @@ jobs:
             # Parse and extract coverage percentage value for comparison
             COVERAGE_VALUE=$(echo "$COVERAGE_PERCENT" | sed 's/%//')
 
-            if (( $(echo "$COVERAGE_VALUE >= 80" | bc -l) )); then
-              echo "✅ Coverage meets the 80% threshold" >> $GITHUB_STEP_SUMMARY
+            if (( $(echo "$COVERAGE_VALUE >= 90" | bc -l) )); then
+              echo "✅ Coverage meets the 90% threshold (OpenSSF Gold badge)" >> $GITHUB_STEP_SUMMARY
             else
-              echo "❌ Coverage below 80% threshold" >> $GITHUB_STEP_SUMMARY
+              echo "❌ Coverage below 90% threshold" >> $GITHUB_STEP_SUMMARY
             fi
           fi
 

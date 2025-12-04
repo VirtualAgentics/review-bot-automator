@@ -234,7 +234,7 @@ addopts = [
     "--cov=src/review_bot_automator",
     "--cov-report=html",
     "--cov-report=term-missing",
-    "--cov-fail-under=80",  # Increased from 50% to enforce quality standards
+    "--cov-fail-under=90",  # Increased from 80% to 90% for OpenSSF Gold badge
 ]
 markers = [
     "slow: marks tests as slow",

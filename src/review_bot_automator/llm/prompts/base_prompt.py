@@ -47,7 +47,14 @@ CodeRabbit comments can contain changes in multiple formats:
 ## Context Information
 
 File: {file_path}
-Line: {line_number}
+Line Range: {start_line} to {end_line}
+
+NOTE: A value of 0 means the line number is unknown. When line context is missing (0),
+rely on diff block line numbers, natural language references, or set confidence < 0.5.
+
+IMPORTANT: When line numbers are provided (non-zero), this comment targets lines
+{start_line}-{end_line} in the file. The changes you extract should have start_line
+and end_line within or very close to this range.
 
 ## Comment Body
 
@@ -82,13 +89,15 @@ Return a JSON array of change objects. Each change must have:
    - Use "unknown" only if truly ambiguous
 
 2. **start_line** (integer >= 1):
-   - Extract from diff block headers (@@ -n,m +n,m @@)
-   - Use line number from context if available
+   - When context line range is available (non-zero), MUST be within or near that range
+   - When context is 0 (unknown), extract from diff block or natural language
+   - Extract precise line from diff block content (count lines from context start)
    - For natural language, infer from phrases like "on line N"
    - If uncertain, set confidence < 0.5
 
 3. **end_line** (integer >= start_line):
-   - Calculate from diff block or suggestion length
+   - When context line range is available (non-zero), MUST be within or near that range
+   - When context is 0 (unknown), calculate from diff block or suggestion length
    - Must be >= start_line
    - For single-line changes, end_line = start_line
 
