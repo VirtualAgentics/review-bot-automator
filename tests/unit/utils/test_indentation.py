@@ -6,6 +6,7 @@ These tests verify that the indentation restoration logic correctly handles
 various edge cases when LLM parsers strip leading whitespace from extracted code.
 """
 
+import pytest
 
 from review_bot_automator.utils.indentation import (
     get_leading_whitespace,
@@ -16,29 +17,20 @@ from review_bot_automator.utils.indentation import (
 class TestGetLeadingWhitespace:
     """Tests for get_leading_whitespace function."""
 
-    def test_spaces(self) -> None:
-        """Extract leading spaces from a line."""
-        assert get_leading_whitespace("    def foo():") == "    "
-
-    def test_tabs(self) -> None:
-        """Extract leading tabs from a line."""
-        assert get_leading_whitespace("\t\tdef foo():") == "\t\t"
-
-    def test_mixed_whitespace(self) -> None:
-        """Extract mixed spaces and tabs."""
-        assert get_leading_whitespace("  \t  content") == "  \t  "
-
-    def test_no_indent(self) -> None:
-        """Return empty string for unindented lines."""
-        assert get_leading_whitespace("no indent") == ""
-
-    def test_empty_line(self) -> None:
-        """Return empty string for empty lines."""
-        assert get_leading_whitespace("") == ""
-
-    def test_whitespace_only(self) -> None:
-        """Return entire content for whitespace-only lines."""
-        assert get_leading_whitespace("    ") == "    "
+    @pytest.mark.parametrize(
+        ("input_line", "expected"),
+        [
+            ("    def foo():", "    "),  # spaces
+            ("\t\tdef foo():", "\t\t"),  # tabs
+            ("  \t  content", "  \t  "),  # mixed whitespace
+            ("no indent", ""),  # no indent
+            ("", ""),  # empty line
+            ("    ", "    "),  # whitespace only
+        ],
+    )
+    def test_get_leading_whitespace(self, input_line: str, expected: str) -> None:
+        """Extract leading whitespace from various line formats."""
+        assert get_leading_whitespace(input_line) == expected
 
 
 class TestRestoreIndentation:
