@@ -281,6 +281,16 @@ class ConflictResolver:
                 line = comment.get("line") or comment.get("original_line")
                 start_line = comment.get("start_line") or comment.get("original_start_line")
 
+                # Validate line range ordering if both are present
+                if start_line is not None and line is not None and start_line > line:
+                    self.logger.warning(
+                        "Invalid line range for %s: start_line=%d > end_line=%d, swapping",
+                        path,
+                        start_line,
+                        line,
+                    )
+                    start_line, line = line, start_line
+
                 if path and body and line:
                     valid_comments.append(
                         CommentInput(
@@ -513,6 +523,18 @@ class ConflictResolver:
         # Calculate effective start and end lines for LLM context
         effective_start = start_line or original_start_line
         effective_end = line or original_line
+
+        # Validate line range ordering if both are present
+        if (
+            effective_start is not None
+            and effective_end is not None
+            and effective_start > effective_end
+        ):
+            self.logger.warning(
+                f"Invalid line range for {path}: start_line={effective_start} > "
+                f"end_line={effective_end}, swapping values"
+            )
+            effective_start, effective_end = effective_end, effective_start
 
         self.logger.debug(
             f"Passing to LLM parser: file_path={path}, "

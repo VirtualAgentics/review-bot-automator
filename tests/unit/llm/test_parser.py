@@ -8,14 +8,18 @@ This module tests the LLM-powered parser implementation including:
 - Fallback behavior (return empty list vs raise exception)
 - Various comment formats (diff blocks, suggestions, natural language)
 - Edge cases (malformed JSON, invalid fields, empty responses)
+- Security features (secret scanning)
+- Cost tracking and budget enforcement
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from review_bot_automator.llm.base import LLMParser
-from review_bot_automator.llm.parser import UniversalLLMParser
+from review_bot_automator.llm.cost_tracker import CostStatus, CostTracker
+from review_bot_automator.llm.exceptions import LLMCostExceededError, LLMSecretDetectedError
+from review_bot_automator.llm.parser import UniversalLLMParser, _strip_json_fences
 from review_bot_automator.llm.providers.base import LLMProvider
 
 
@@ -582,3 +586,199 @@ class TestUniversalLLMParserFallbackStats:
         assert fallback_count == 1
         assert total_count == 1
         assert rate == 1.0
+
+
+class TestStripJsonFences:
+    """Test JSON code fence stripping utility function."""
+
+    def test_strip_json_fence(self) -> None:
+        """Test stripping ```json fences from response."""
+        text = '```json\n[{"key": "value"}]\n```'
+        result = _strip_json_fences(text)
+        assert result == '[{"key": "value"}]'
+
+    def test_strip_plain_fence(self) -> None:
+        """Test stripping plain ``` fences without json marker."""
+        text = '```\n[{"key": "value"}]\n```'
+        result = _strip_json_fences(text)
+        assert result == '[{"key": "value"}]'
+
+    def test_no_fence_returns_original(self) -> None:
+        """Test that text without fences is returned unchanged."""
+        text = '[{"key": "value"}]'
+        result = _strip_json_fences(text)
+        assert result == '[{"key": "value"}]'
+
+
+class TestSecretScanning:
+    """Test secret scanning security feature."""
+
+    def test_secret_detected_raises_error(self) -> None:
+        """Test that detected secrets raise LLMSecretDetectedError."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        parser = UniversalLLMParser(mock_provider, scan_for_secrets=True)
+
+        # Comment containing what looks like an API key (test data, not real)
+        secret_comment = "api_key = 'sk-1234567890abcdefghijklmnopqrstuvwxyz12345'"  # noqa: S105
+
+        with pytest.raises(LLMSecretDetectedError):
+            parser.parse_comment(secret_comment, file_path="src/config.py")
+
+        # Provider should NOT have been called
+        mock_provider.generate.assert_not_called()
+
+    def test_secret_scanning_disabled_allows_through(self) -> None:
+        """Test that disabling secret scanning allows potentially sensitive content."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.return_value = "[]"
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, scan_for_secrets=False)
+
+        # This would normally trigger secret detection (test data, not real)
+        secret_comment = "api_key = 'sk-1234567890abcdefghijklmnopqrstuvwxyz12345'"  # noqa: S105
+
+        # Should not raise, secret scanning is disabled
+        result = parser.parse_comment(secret_comment, file_path="src/config.py")
+        assert result == []
+        mock_provider.generate.assert_called_once()
+
+
+class TestCostTracking:
+    """Test cost tracking and budget enforcement."""
+
+    def test_cost_exceeded_before_call_raises(self) -> None:
+        """Test that exceeding budget before call raises LLMCostExceededError."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        cost_tracker = MagicMock(spec=CostTracker)
+        cost_tracker.should_block_request.return_value = True
+        cost_tracker.accumulated_cost = 10.0
+        cost_tracker.budget = 5.0
+
+        parser = UniversalLLMParser(
+            mock_provider, cost_tracker=cost_tracker, fallback_to_regex=False
+        )
+
+        with pytest.raises(LLMCostExceededError, match="Cost budget exceeded"):
+            parser.parse_comment("Fix this", file_path="src/test.py")
+
+        # Provider should NOT have been called
+        mock_provider.generate.assert_not_called()
+
+    def test_cost_exceeded_with_fallback_returns_empty(self) -> None:
+        """Test that cost exceeded during request with fallback returns empty list."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        # First call succeeds, but add_cost raises LLMCostExceededError
+        mock_provider.generate.return_value = "[]"
+        mock_provider.get_total_cost.side_effect = [0.0, 10.0]  # Before and after
+
+        cost_tracker = MagicMock(spec=CostTracker)
+        cost_tracker.should_block_request.return_value = False  # Allow first request
+
+        # Simulate exception during cost tracking (after LLM call)
+        def add_cost_side_effect(cost: float) -> CostStatus:
+            raise LLMCostExceededError(
+                "Budget exceeded after call",
+                accumulated_cost=10.0,
+                budget=5.0,
+            )
+
+        cost_tracker.add_cost.side_effect = add_cost_side_effect
+
+        parser = UniversalLLMParser(
+            mock_provider, cost_tracker=cost_tracker, fallback_to_regex=True
+        )
+
+        result = parser.parse_comment("Fix this", file_path="src/test.py")
+
+        assert result == []
+        # Provider WAS called (exception happens during cost tracking after the call)
+        mock_provider.generate.assert_called_once()
+
+    def test_cost_warning_threshold_logged(self) -> None:
+        """Test that cost warning is logged when threshold is reached."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.return_value = "[]"
+        mock_provider.get_total_cost.side_effect = [0.0, 4.5]  # Before and after
+
+        cost_tracker = MagicMock(spec=CostTracker)
+        cost_tracker.should_block_request.return_value = False
+        cost_tracker.add_cost.return_value = CostStatus.WARNING
+        cost_tracker.get_warning_message.return_value = "Warning: 80% of budget used"
+
+        parser = UniversalLLMParser(mock_provider, cost_tracker=cost_tracker)
+
+        with patch("review_bot_automator.llm.parser.logger") as mock_logger:
+            parser.parse_comment("Fix this", file_path="src/test.py")
+            mock_logger.warning.assert_called_with("Warning: 80% of budget used")
+
+    def test_cost_tracking_records_request_cost(self) -> None:
+        """Test that cost tracking records the incremental request cost."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.return_value = "[]"
+        mock_provider.get_total_cost.side_effect = [0.0, 0.05]  # Before: $0.00, After: $0.05
+
+        cost_tracker = MagicMock(spec=CostTracker)
+        cost_tracker.should_block_request.return_value = False
+        cost_tracker.add_cost.return_value = CostStatus.OK
+
+        parser = UniversalLLMParser(mock_provider, cost_tracker=cost_tracker)
+        parser.parse_comment("Fix this", file_path="src/test.py")
+
+        # Should have added the incremental cost ($0.05 - $0.00 = $0.05)
+        cost_tracker.add_cost.assert_called_once_with(0.05)
+
+    def test_cost_exceeded_without_fallback_raises(self) -> None:
+        """Test that cost exceeded during request without fallback raises error."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.return_value = "[]"
+        mock_provider.get_total_cost.side_effect = [0.0, 10.0]
+
+        cost_tracker = MagicMock(spec=CostTracker)
+        cost_tracker.should_block_request.return_value = False
+
+        # Simulate exception during cost tracking
+        def add_cost_side_effect(cost: float) -> CostStatus:
+            raise LLMCostExceededError(
+                "Budget exceeded after call",
+                accumulated_cost=10.0,
+                budget=5.0,
+            )
+
+        cost_tracker.add_cost.side_effect = add_cost_side_effect
+
+        parser = UniversalLLMParser(
+            mock_provider, cost_tracker=cost_tracker, fallback_to_regex=False
+        )
+
+        with pytest.raises(LLMCostExceededError, match="Budget exceeded after call"):
+            parser.parse_comment("Fix this", file_path="src/test.py")
+
+
+class TestJsonFenceInLLMResponse:
+    """Test handling of JSON fences in LLM responses."""
+
+    def test_parse_response_with_json_fence(self) -> None:
+        """Test that parser strips JSON fences from LLM response."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.return_value = """```json
+[
+    {
+        "file_path": "src/test.py",
+        "start_line": 1,
+        "end_line": 2,
+        "new_content": "# Fixed",
+        "change_type": "modification",
+        "confidence": 0.9,
+        "rationale": "LLM wrapped response in fence",
+        "risk_level": "low"
+    }
+]
+```"""
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider)
+        changes = parser.parse_comment("Fix this", file_path="src/test.py")
+
+        assert len(changes) == 1
+        assert changes[0].file_path == "src/test.py"

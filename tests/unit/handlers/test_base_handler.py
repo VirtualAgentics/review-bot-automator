@@ -176,15 +176,13 @@ class TestRestoreFile:
         assert result is True
         assert original.read_text(encoding="utf-8") == "original"
 
-    def test_restore_unsafe_segment_fails(self, tmp_path: Path) -> None:
-        """Test that paths with unsafe segments fail validation."""
+    def test_restore_nonexistent_files_fails(self, tmp_path: Path) -> None:
+        """Test that restore fails when both files don't exist."""
         handler = ConcreteHandler(workspace_root=tmp_path)
 
-        # Path with potentially unsafe characters would fail SAFE_PART_PATTERN
-        # Note: This tests the relaxed validation path
+        # Both backup and original don't exist
         result = handler.restore_file(str(tmp_path / "test.txt.backup"), str(tmp_path / "test.txt"))
 
-        # Should fail because files don't exist
         assert result is False
 
     def test_restore_nonexistent_backup_fails(self, tmp_path: Path) -> None:

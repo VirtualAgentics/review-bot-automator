@@ -221,11 +221,13 @@ class UniversalLLMParser(LLMParser):
 
         try:
             # Handle backward compatibility: line_number maps to end_line
-            effective_start = start_line if start_line is not None else "unknown"
+            # Use 0 as sentinel for "unknown" to maintain consistent integer typing
+            # in the prompt template (0 is invalid for 1-indexed line numbers)
+            effective_start = start_line if start_line is not None else 0
             effective_end = (
                 end_line
                 if end_line is not None
-                else (line_number if line_number is not None else "unknown")
+                else (line_number if line_number is not None else 0)
             )
 
             # Build prompt with context (now includes start_line and end_line)
@@ -236,19 +238,22 @@ class UniversalLLMParser(LLMParser):
                 end_line=effective_end,
             )
 
-            logger.debug(
-                f"Parsing comment: file={file_path}, "
-                f"start_line={effective_start}, end_line={effective_end}, "
-                f"body_length={len(comment_body)}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Parsing comment: file=%s, start_line=%s, end_line=%s, body_length=%d",
+                    file_path,
+                    effective_start,
+                    effective_end,
+                    len(comment_body),
+                )
 
-            # DEBUG: Log the context section of the prompt (Issue #285 investigation)
-            # Extract just the context part to see what the LLM receives
-            context_start_idx = prompt.find("## Context Information")
-            context_end_idx = prompt.find("## Comment Body")
-            if context_start_idx != -1 and context_end_idx != -1:
-                context_section = prompt[context_start_idx:context_end_idx].strip()
-                logger.debug(f"Prompt context section:\n{context_section}")
+                # Log the context section of the prompt (Issue #285 investigation)
+                # Extract just the context part to see what the LLM receives
+                context_start_idx = prompt.find("## Context Information")
+                context_end_idx = prompt.find("## Comment Body")
+                if context_start_idx != -1 and context_end_idx != -1:
+                    context_section = prompt[context_start_idx:context_end_idx].strip()
+                    logger.debug("Prompt context section:\n%s", context_section)
 
             # Track cost before call to calculate incremental cost
             previous_cost = self.provider.get_total_cost() if self.cost_tracker else 0.0
@@ -268,7 +273,7 @@ class UniversalLLMParser(LLMParser):
                     if warning_msg:
                         logger.warning(warning_msg)
 
-            logger.debug(f"LLM response length: {len(response)} characters")
+            logger.debug("LLM response length: %d characters", len(response))
 
             # Strip markdown code fences if present (LLMs sometimes add them)
             json_text = _strip_json_fences(response)
@@ -306,9 +311,14 @@ class UniversalLLMParser(LLMParser):
 
                     parsed_changes.append(change)
                     logger.debug(
-                        f"Parsed change {idx+1}/{len(changes_data)}: "
-                        f"{change.file_path}:{change.start_line}-{change.end_line} "
-                        f"(confidence={change.confidence:.2f}, risk={change.risk_level})"
+                        "Parsed change %d/%d: %s:%d-%d (confidence=%.2f, risk=%s)",
+                        idx + 1,
+                        len(changes_data),
+                        change.file_path,
+                        change.start_line,
+                        change.end_line,
+                        change.confidence,
+                        change.risk_level,
                     )
 
                 except (TypeError, ValueError) as e:
