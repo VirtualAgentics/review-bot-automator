@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2025-12-04
+
+### Fixed
+
+* **LLM Indentation Restoration**: Fixed issue where LLM parser stripped leading indentation from extracted code, causing `IndentationError` when applied to Python files (#295, Issue #287)
+* **LLM Line Number Accuracy**: Pass `start_line` context to LLM for accurate line number extraction in review comments (#286, Issue #285)
+* **Documentation**: Correct secret pattern count to 24 across all security documentation (#275)
+
+### Changed
+
+* **Test Coverage**: Increase test coverage to 91%+ for OpenSSF Gold badge requirement (#284, Issue #271)
+* **License Headers**: Add SPDX license headers to all source files for compliance (#276)
+* **Pre-commit Hooks**: Sync ruff pre-commit hook to v0.14.8 (#297)
+
+### Dependencies
+
+* Update ruff to v0.14.8 (#296, #297)
+* Update mypy to v1.19.0 (#283)
+* Update anyio to v4.12.0 (#279)
+* Update hypothesis to v6.148.6 (#261)
+* Update GitHub Actions (#282)
+
+### Documentation
+
+* Add comprehensive code review standards documentation (#277)
+* Add OpenSSF Best Practices Silver badge documentation (#274)
+
 ## [2.0.1] - 2025-11-27
 
 ### Added

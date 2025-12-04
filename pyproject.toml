@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "review-bot-automator"
-version = "2.0.1"
+version = "2.0.2"
 description = "Universal AI-powered automation for GitHub code review bots with intelligent conflict resolution"
 authors = [
     { name = "VirtualAgentics", email = "bdc@virtualagentics.ai" },
