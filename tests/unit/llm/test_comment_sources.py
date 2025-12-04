@@ -12,6 +12,7 @@ import pytest
 
 from review_bot_automator.llm.comment_sources import (
     AIPromptBlock,
+    DetailsBlock,
     DetailsBlockType,
     DiffBlock,
     SuggestionBlock,
@@ -518,6 +519,18 @@ class TestDataclassImmutability:
         block = AIPromptBlock(summary="test", content="content", position=0)
         with pytest.raises(AttributeError):
             block.summary = "modified"  # type: ignore[misc]
+
+    def test_details_block_frozen(self) -> None:
+        """Test that DetailsBlock cannot be mutated."""
+        block = DetailsBlock(
+            summary="test",
+            content="content",
+            block_type=DetailsBlockType.OTHER,
+            position=0,
+            raw="<details>test</details>",
+        )
+        with pytest.raises(AttributeError):
+            block.content = "modified"  # type: ignore[misc]
 
     def test_comment_sources_frozen(self) -> None:
         """Test that CommentSources cannot be mutated."""

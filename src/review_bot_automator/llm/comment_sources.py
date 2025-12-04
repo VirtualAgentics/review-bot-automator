@@ -312,12 +312,15 @@ def _strip_html_comments(text: str) -> tuple[str, int]:
     Returns:
         Tuple of (cleaned_text, comment_count).
     """
-    matches = list(_HTML_COMMENT_PATTERN.finditer(text))
-    if not matches:
-        return text, 0
+    count = 0
 
-    cleaned = _HTML_COMMENT_PATTERN.sub("", text)
-    return cleaned, len(matches)
+    def counter(match: re.Match[str]) -> str:
+        nonlocal count
+        count += 1
+        return ""
+
+    cleaned = _HTML_COMMENT_PATTERN.sub(counter, text)
+    return cleaned, count
 
 
 def _classify_details_block(summary: str) -> DetailsBlockType:
