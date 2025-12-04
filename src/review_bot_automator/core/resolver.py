@@ -296,7 +296,7 @@ class ConflictResolver:
                         CommentInput(
                             body=body,
                             file_path=path,
-                            line_number=line,  # Kept for backward compatibility
+                            line_number=line,  # TODO(#294): Deprecated, use end_line
                             start_line=start_line,
                             end_line=line,
                         )

@@ -35,14 +35,16 @@ class CommentInput:
     Attributes:
         body: Raw comment text from GitHub
         file_path: Optional file path for context
-        line_number: Deprecated - use end_line instead. Kept for backward compatibility.
+        line_number: Deprecated - use end_line instead. Will be removed in future version.
+            See https://github.com/VirtualAgentics/review-bot-automator/issues/294
         start_line: Start of the diff range (from GitHub start_line field)
         end_line: End of the diff range (from GitHub line field)
     """
 
     body: str
     file_path: str | None = None
-    line_number: int | None = None  # Deprecated, use end_line
+    # TODO(#294): Remove line_number once all callers migrate to start_line/end_line
+    line_number: int | None = None  # Deprecated, use end_line instead
     start_line: int | None = None
     end_line: int | None = None
 
