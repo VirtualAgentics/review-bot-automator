@@ -257,3 +257,92 @@ class TestSecurityConfigEquality:
         assert config1 == config2
         assert config1 != config3
         assert hash(config1) == hash(config2)
+
+
+class TestSecurityConfigValidation:
+    """Test validation error paths in __post_init__."""
+
+    def test_invalid_max_file_size_zero(self) -> None:
+        """Test that zero max_file_size raises ValueError."""
+        with pytest.raises(ValueError, match="max_file_size must be a positive integer"):
+            SecurityConfig(max_file_size=0)
+
+    def test_invalid_max_file_size_negative(self) -> None:
+        """Test that negative max_file_size raises ValueError."""
+        with pytest.raises(ValueError, match="max_file_size must be a positive integer"):
+            SecurityConfig(max_file_size=-1)
+
+    def test_invalid_max_file_size_not_int(self) -> None:
+        """Test that non-integer max_file_size raises ValueError."""
+        with pytest.raises(ValueError, match="max_file_size must be a positive integer"):
+            SecurityConfig(max_file_size=10.5)  # type: ignore[arg-type]
+
+    def test_invalid_github_api_timeout_zero(self) -> None:
+        """Test that zero github_api_timeout raises ValueError."""
+        with pytest.raises(ValueError, match="github_api_timeout must be a positive integer"):
+            SecurityConfig(github_api_timeout=0)
+
+    def test_invalid_github_api_timeout_negative(self) -> None:
+        """Test that negative github_api_timeout raises ValueError."""
+        with pytest.raises(ValueError, match="github_api_timeout must be a positive integer"):
+            SecurityConfig(github_api_timeout=-5)
+
+    def test_invalid_github_api_timeout_not_int(self) -> None:
+        """Test that non-integer github_api_timeout raises ValueError."""
+        with pytest.raises(ValueError, match="github_api_timeout must be a positive integer"):
+            SecurityConfig(github_api_timeout=30.0)  # type: ignore[arg-type]
+
+    def test_invalid_github_max_retries_zero(self) -> None:
+        """Test that zero github_max_retries raises ValueError."""
+        with pytest.raises(ValueError, match="github_max_retries must be a positive integer"):
+            SecurityConfig(github_max_retries=0)
+
+    def test_invalid_github_max_retries_negative(self) -> None:
+        """Test that negative github_max_retries raises ValueError."""
+        with pytest.raises(ValueError, match="github_max_retries must be a positive integer"):
+            SecurityConfig(github_max_retries=-1)
+
+    def test_invalid_github_max_retries_not_int(self) -> None:
+        """Test that non-integer github_max_retries raises ValueError."""
+        with pytest.raises(ValueError, match="github_max_retries must be a positive integer"):
+            SecurityConfig(github_max_retries=3.5)  # type: ignore[arg-type]
+
+    def test_invalid_max_backup_count_negative(self) -> None:
+        """Test that negative max_backup_count raises ValueError."""
+        with pytest.raises(ValueError, match="max_backup_count must be a non-negative integer"):
+            SecurityConfig(max_backup_count=-1)
+
+    def test_valid_max_backup_count_zero(self) -> None:
+        """Test that zero max_backup_count is valid."""
+        config = SecurityConfig(max_backup_count=0)
+        assert config.max_backup_count == 0
+
+    def test_invalid_max_backup_count_not_int(self) -> None:
+        """Test that non-integer max_backup_count raises ValueError."""
+        with pytest.raises(ValueError, match="max_backup_count must be a non-negative integer"):
+            SecurityConfig(max_backup_count=5.5)  # type: ignore[arg-type]
+
+    def test_invalid_allowed_extensions_not_frozenset(self) -> None:
+        """Test that non-frozenset allowed_extensions raises ValueError."""
+        with pytest.raises(ValueError, match="allowed_extensions must be a frozenset"):
+            SecurityConfig(allowed_extensions={".py", ".js"})  # type: ignore[arg-type]
+
+    def test_invalid_allowed_extensions_list(self) -> None:
+        """Test that list allowed_extensions raises ValueError."""
+        with pytest.raises(ValueError, match="allowed_extensions must be a frozenset"):
+            SecurityConfig(allowed_extensions=[".py", ".js"])  # type: ignore[arg-type]
+
+    def test_invalid_allowed_extensions_empty(self) -> None:
+        """Test that empty allowed_extensions raises ValueError."""
+        with pytest.raises(ValueError, match="allowed_extensions cannot be empty"):
+            SecurityConfig(allowed_extensions=frozenset())
+
+    def test_invalid_allowed_extensions_non_string(self) -> None:
+        """Test that non-string elements in allowed_extensions raise ValueError."""
+        with pytest.raises(ValueError, match="All extensions.*must be strings"):
+            SecurityConfig(allowed_extensions=frozenset({".py", 123}))  # type: ignore[arg-type]
+
+    def test_invalid_allowed_extensions_none_element(self) -> None:
+        """Test that None element in allowed_extensions raises ValueError."""
+        with pytest.raises(ValueError, match="All extensions.*must be strings"):
+            SecurityConfig(allowed_extensions=frozenset({".py", None}))  # type: ignore[arg-type]
