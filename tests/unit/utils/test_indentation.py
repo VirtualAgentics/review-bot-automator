@@ -237,3 +237,45 @@ class TestRestoreIndentationIntegration:
         replacement = ["host: 127.0.0.1"]  # Missing 4-space indent
         result = restore_indentation(original, replacement, 2)
         assert result == ["    host: 127.0.0.1"]
+
+
+class TestRestoreIndentationEdgeCases:
+    """Edge case tests for complete coverage."""
+
+    def test_whitespace_only_lines_unchanged(self) -> None:
+        """Replacement with only whitespace-only lines (no content) is unchanged.
+
+        This covers line 80: when first_content_line is None because all lines
+        are whitespace-only (not empty strings, but contain only spaces/tabs).
+        """
+        original = ["def foo():", "    pass"]
+        # Lines with only whitespace - no actual content
+        replacement = ["   ", "\t", "  \t  "]
+        result = restore_indentation(original, replacement, 1)
+        # Should return unchanged since there's no content to indent
+        assert result == ["   ", "\t", "  \t  "]
+
+    def test_multiline_dedented_with_wrong_base(self) -> None:
+        """Multi-line with dedented line and wrong base indent.
+
+        Covers line 107: Line has less indent than base, uses no relative indent.
+        """
+        original = ["class Foo:", "    def method(self):", "        pass"]
+        # First line has 8 spaces (wrong), second line has only 2 spaces
+        # Expected indent is 4 spaces
+        replacement = [
+            "        def method(self):",  # 8 spaces (base, wrong)
+            "  if True:",  # Only 2 spaces - less than 8-space base
+            "        return 42",  # Back to 8 spaces
+        ]
+        result = restore_indentation(original, replacement, 1)
+        # Expected: 4 spaces for first line
+        # Second line: has 2 spaces which doesn't start with 8-space base
+        #              so relative_indent = "", result = "    if True:"
+        # Third line: has 8 spaces which starts with 8-space base
+        #             relative_indent = "", result = "    return 42"
+        assert result == [
+            "    def method(self):",
+            "    if True:",
+            "    return 42",
+        ]
