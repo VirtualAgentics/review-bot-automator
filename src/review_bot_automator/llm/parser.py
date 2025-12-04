@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Pattern to match markdown JSON code fences
 _JSON_FENCE_PATTERN = re.compile(
     r"^```(?:json)?\s*\n(.*?)\n```\s*$",
-    re.DOTALL | re.MULTILINE,
+    re.DOTALL,
 )
 
 

@@ -7,11 +7,15 @@ This module tests the integration between ConflictResolver and UniversalLLMParse
 - Backward compatibility (resolver without LLM parser)
 """
 
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    import pytest
 
 from review_bot_automator.core.models import FileType
 from review_bot_automator.core.resolver import ConflictResolver
@@ -812,6 +816,11 @@ class TestLineRangeValidation:
         assert len(changes) == 5
         assert all(c.parsing_method == "llm" for c in changes)
 
+        # Verify that the normalized range (10 → 50) was actually propagated to the LLM
+        # First comment had start_line=50, line=10 which should be swapped to 10→50
+        prompts = [call.args[0] for call in mock_provider.generate.call_args_list]
+        assert any("Line Range: 10 to 50" in prompt for prompt in prompts)
+
     def test_sequential_parsing_swaps_invalid_line_range(self, tmp_path: Path) -> None:
         """Test that invalid line ranges are swapped in sequential LLM parsing path.
 
@@ -854,7 +863,15 @@ class TestLineRangeValidation:
         # Verify parse_comment was called (sequential path)
         mock_parser.parse_comment.assert_called_once()
 
-    def test_sequential_parsing_with_diff_hunk_logs_header(self, tmp_path: Path) -> None:
+        # Verify parse_comment was called with the swapped (normalized) range
+        # Original: start_line=100, line=10 → normalized: start_line=10, end_line=100
+        _, kwargs = mock_parser.parse_comment.call_args
+        assert kwargs["start_line"] == 10
+        assert kwargs["end_line"] == 100
+
+    def test_sequential_parsing_with_diff_hunk_logs_header(
+        self, tmp_path: Path, caplog: "pytest.LogCaptureFixture"
+    ) -> None:
         """Test that diff hunk header is logged when present in sequential path.
 
         Covers resolver.py:516-517 - the diff hunk header extraction logging.
@@ -887,10 +904,13 @@ class TestLineRangeValidation:
             }
         ]
 
-        changes = resolver.extract_changes_from_comments(comments, parallel_parsing=False)
+        with caplog.at_level(logging.DEBUG):
+            changes = resolver.extract_changes_from_comments(comments, parallel_parsing=False)
 
         assert len(changes) == 1
         assert changes[0].parsing_method == "llm"
+        # Verify that the diff hunk header was logged
+        assert "@@ -8,5 +8,6 @@" in caplog.text
 
     def test_parallel_parsing_with_original_line_fields(self, tmp_path: Path) -> None:
         """Test parallel parsing handles original_start_line and original_line fields.
@@ -952,3 +972,8 @@ class TestLineRangeValidation:
 
         assert len(changes) == 5
         assert all(c.parsing_method == "llm" for c in changes)
+
+        # Verify that original_start_line/original_line were used for the effective range
+        # First comment used original_start_line=5, original_line=15
+        prompts = [call.args[0] for call in mock_provider.generate.call_args_list]
+        assert any("Line Range: 5 to 15" in prompt for prompt in prompts)

@@ -143,6 +143,32 @@ class ConflictResolver:
         content_str = f"{path}:{start}:{end}:{normalized}"
         return hashlib.sha256(content_str.encode()).hexdigest()[:16]
 
+    def _normalize_line_range(
+        self, start_line: int | None, end_line: int | None, path: str
+    ) -> tuple[int | None, int | None]:
+        """Normalize line range, swapping if start > end.
+
+        GitHub API sometimes returns malformed line ranges where start_line > line (end).
+        This method ensures the range is valid by swapping if needed.
+
+        Args:
+            start_line: Start of the line range (may be None)
+            end_line: End of the line range (may be None)
+            path: File path for logging context
+
+        Returns:
+            Tuple of (start_line, end_line), swapped if start > end
+        """
+        if start_line is not None and end_line is not None and start_line > end_line:
+            self.logger.warning(
+                "Invalid line range for %s: start_line=%d > end_line=%d, swapping",
+                path,
+                start_line,
+                end_line,
+            )
+            return end_line, start_line
+        return start_line, end_line
+
     def extract_changes_from_comments(
         self,
         comments: list[dict[str, Any]],
@@ -281,17 +307,9 @@ class ConflictResolver:
                 line = comment.get("line") or comment.get("original_line")
                 start_line = comment.get("start_line") or comment.get("original_start_line")
 
-                # Validate line range ordering if both are present
-                if start_line is not None and line is not None and start_line > line:
-                    self.logger.warning(
-                        "Invalid line range for %s: start_line=%d > end_line=%d, swapping",
-                        path,
-                        start_line,
-                        line,
-                    )
-                    start_line, line = line, start_line
-
                 if path and body and line:
+                    # Validate line range ordering if both are present
+                    start_line, line = self._normalize_line_range(start_line, line, path)
                     valid_comments.append(
                         CommentInput(
                             body=body,
@@ -498,7 +516,7 @@ class ConflictResolver:
             return []
 
         # Extract line context from comment
-        # DEBUG: Log all available line fields from GitHub API (Issue #285 investigation)
+        # TODO(#285): Remove verbose line field logging after Issue #285 is confirmed fixed
         start_line = comment.get("start_line")
         original_start_line = comment.get("original_start_line")
         line = comment.get("line")
@@ -525,16 +543,9 @@ class ConflictResolver:
         effective_end = line or original_line
 
         # Validate line range ordering if both are present
-        if (
-            effective_start is not None
-            and effective_end is not None
-            and effective_start > effective_end
-        ):
-            self.logger.warning(
-                f"Invalid line range for {path}: start_line={effective_start} > "
-                f"end_line={effective_end}, swapping values"
-            )
-            effective_start, effective_end = effective_end, effective_start
+        effective_start, effective_end = self._normalize_line_range(
+            effective_start, effective_end, path
+        )
 
         self.logger.debug(
             f"Passing to LLM parser: file_path={path}, "
