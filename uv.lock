@@ -565,14 +565,14 @@ wheels = [
 
 [[package]]
 name = "hypothesis"
-version = "6.148.2"
+version = "6.148.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "sortedcontainers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4a/99/a3c6eb3fdd6bfa01433d674b0f12cd9102aa99630689427422d920aea9c6/hypothesis-6.148.2.tar.gz", hash = "sha256:07e65d34d687ddff3e92a3ac6b43966c193356896813aec79f0a611c5018f4b1", size = 469984, upload-time = "2025-11-18T20:21:17.047Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/2f/828a50d0a87acf28e3788b1987250ed1cd08d7f0c91a138e3b4f9ffe5198/hypothesis-6.148.6.tar.gz", hash = "sha256:0ef1381f893650590f2c5918318d4c8240c79e481bbb621a49acc3dba868d80f", size = 470734, upload-time = "2025-12-04T05:51:39.588Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/d2/c2673aca0127e204965e0e9b3b7a0e91e9b12993859ac8758abd22669b89/hypothesis-6.148.2-py3-none-any.whl", hash = "sha256:bf8ddc829009da73b321994b902b1964bcc3e5c3f0ed9a1c1e6a1631ab97c5fa", size = 536986, upload-time = "2025-11-18T20:21:15.212Z" },
+    { url = "https://files.pythonhosted.org/packages/26/23/59af28c84413a7b92036a04d600b3f1132783096503e0259a5463fa20f96/hypothesis-6.148.6-py3-none-any.whl", hash = "sha256:126325f3e84f297d7cce5071ebe1f38744fbc54493ca0adf294d6fa1034e5efc", size = 537645, upload-time = "2025-12-04T05:51:36.989Z" },
 ]
 
 [[package]]
@@ -1704,7 +1704,7 @@ wheels = [
 
 [[package]]
 name = "review-bot-automator"
-version = "2.0.0"
+version = "2.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
@@ -1751,7 +1751,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = "==25.11.0" },
     { name = "build", marker = "extra == 'dev'", specifier = "==1.3.0" },
     { name = "click", specifier = "==8.3.1" },
-    { name = "hypothesis", marker = "extra == 'dev'", specifier = "==6.148.2" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = "==6.148.6" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.18.2" },
     { name = "myst-parser", marker = "extra == 'dev'", specifier = "==4.0.1" },
     { name = "numpy", marker = "extra == 'ml'", specifier = "==2.3.5" },
