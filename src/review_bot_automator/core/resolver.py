@@ -279,13 +279,16 @@ class ConflictResolver:
                 path = comment.get("path")
                 body = comment.get("body", "")
                 line = comment.get("line") or comment.get("original_line")
+                start_line = comment.get("start_line") or comment.get("original_start_line")
 
                 if path and body and line:
                     valid_comments.append(
                         CommentInput(
                             body=body,
                             file_path=path,
-                            line_number=line,
+                            line_number=line,  # Kept for backward compatibility
+                            start_line=start_line,
+                            end_line=line,
                         )
                     )
                     comment_indices.append(idx)
@@ -485,17 +488,53 @@ class ConflictResolver:
             return []
 
         # Extract line context from comment
-        line = comment.get("line") or comment.get("original_line")
-        if not line:
+        # DEBUG: Log all available line fields from GitHub API (Issue #285 investigation)
+        start_line = comment.get("start_line")
+        original_start_line = comment.get("original_start_line")
+        line = comment.get("line")
+        original_line = comment.get("original_line")
+        diff_hunk = comment.get("diff_hunk")
+
+        self.logger.debug(
+            f"GitHub comment line fields for {path}: "
+            f"start_line={start_line}, line={line}, "
+            f"original_start_line={original_start_line}, original_line={original_line}, "
+            f"diff_hunk_present={diff_hunk is not None}"
+        )
+        if diff_hunk:
+            # Extract just the @@ header for logging
+            hunk_header = diff_hunk.split("\n")[0] if diff_hunk else "N/A"
+            self.logger.debug(f"Diff hunk header: {hunk_header}")
+
+        effective_line = line or original_line
+        if not effective_line:
             return []
 
+        # Calculate effective start and end lines for LLM context
+        effective_start = start_line or original_start_line
+        effective_end = line or original_line
+
+        self.logger.debug(
+            f"Passing to LLM parser: file_path={path}, "
+            f"start_line={effective_start}, end_line={effective_end}"
+        )
+
         try:
-            # Parse comment with LLM
+            # Parse comment with LLM - pass both start and end line for accurate context
             parsed_changes = self.llm_parser.parse_comment(
                 comment_body=body,
                 file_path=path,
-                line_number=line,
+                start_line=effective_start,
+                end_line=effective_end,
             )
+
+            # DEBUG: Log LLM returned line numbers (Issue #285 investigation)
+            for idx, pc in enumerate(parsed_changes):
+                self.logger.debug(
+                    f"LLM returned change {idx+1}: "
+                    f"start_line={pc.start_line}, end_line={pc.end_line}, "
+                    f"confidence={pc.confidence:.2f}"
+                )
 
             # Convert ParsedChange objects to Change objects
             changes = []
@@ -508,7 +547,8 @@ class ConflictResolver:
 
             if changes:
                 self.logger.info(
-                    f"LLM extracted {len(changes)} change(s) from comment on {path}:{line}"
+                    f"LLM extracted {len(changes)} change(s) from comment on "
+                    f"{path}:{effective_end}"
                 )
 
             return changes

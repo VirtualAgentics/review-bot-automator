@@ -35,12 +35,16 @@ class CommentInput:
     Attributes:
         body: Raw comment text from GitHub
         file_path: Optional file path for context
-        line_number: Optional line number where comment was posted
+        line_number: Deprecated - use end_line instead. Kept for backward compatibility.
+        start_line: Start of the diff range (from GitHub start_line field)
+        end_line: End of the diff range (from GitHub line field)
     """
 
     body: str
     file_path: str | None = None
-    line_number: int | None = None
+    line_number: int | None = None  # Deprecated, use end_line
+    start_line: int | None = None
+    end_line: int | None = None
 
 
 @runtime_checkable
@@ -252,6 +256,8 @@ class ParallelLLMParser(UniversalLLMParser):
                     comment_body=comment.body,
                     file_path=comment.file_path,
                     line_number=comment.line_number,
+                    start_line=comment.start_line,
+                    end_line=comment.end_line,
                 )
 
                 # Update progress (minimize lock hold time)
@@ -375,6 +381,8 @@ class ParallelLLMParser(UniversalLLMParser):
                     comment_body=comment.body,
                     file_path=comment.file_path,
                     line_number=comment.line_number,
+                    start_line=comment.start_line,
+                    end_line=comment.end_line,
                 )
                 results.append(parsed_changes)
 

@@ -110,6 +110,9 @@ class LLMParser(ABC):
         comment_body: str,
         file_path: str | None = None,
         line_number: int | None = None,
+        *,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> list[ParsedChange]:
         """Parse a GitHub comment to extract code changes.
 
@@ -125,7 +128,9 @@ class LLMParser(ABC):
         Args:
             comment_body: Raw comment text from GitHub (markdown format)
             file_path: Optional file path for context (helps with ambiguous suggestions)
-            line_number: Optional line number where comment was posted
+            line_number: Deprecated - use end_line instead. Kept for backward compatibility.
+            start_line: Start of the diff range (from GitHub start_line field)
+            end_line: End of the diff range (from GitHub line field)
 
         Returns:
             List of ParsedChange objects. Empty list if:
