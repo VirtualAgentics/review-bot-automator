@@ -8,9 +8,9 @@ anthropic==0.75.0 \
     --hash=sha256:e8607422f4ab616db2ea5baacc215dd5f028da99ce2f022e33c7c535b29f3dfb \
     --hash=sha256:ea8317271b6c15d80225a9f3c670152746e88805a7a61e14d4a374577164965b
     # via -r requirements.in
-anyio==4.11.0 \
-    --hash=sha256:0287e96f4d26d4149305414d4e3bc32f0dcd0862365a4bddea19d7a1ec38c4fc \
-    --hash=sha256:82a8d0b81e318cc5ce71a5f1f8b5c4e63619620b63141ef8c995fa0db95a57c4
+anyio==4.12.0 \
+    --hash=sha256:73c693b567b0c55130c104d0b43a9baf3aa6a31fc6110116509f27bf75e21ec0 \
+    --hash=sha256:dad2376a628f98eeca4881fc56cd06affd18f659b17a747d3ff0307ced94b1bb
     # via
     #   anthropic
     #   httpx
