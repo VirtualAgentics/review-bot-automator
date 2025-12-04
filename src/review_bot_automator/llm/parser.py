@@ -22,6 +22,7 @@ import re
 import threading
 
 from review_bot_automator.llm.base import LLMParser, ParsedChange
+from review_bot_automator.llm.comment_sources import CommentSources, extract_comment_sources
 from review_bot_automator.llm.cost_tracker import CostStatus, CostTracker
 from review_bot_automator.llm.exceptions import LLMCostExceededError, LLMSecretDetectedError
 from review_bot_automator.llm.prompts import PARSE_COMMENT_PROMPT
@@ -35,6 +36,9 @@ _JSON_FENCE_PATTERN = re.compile(
     r"^```(?:json)?\s*\n(.*?)\n```\s*$",
     re.DOTALL,
 )
+
+# Maximum characters to include in AI prompt preview for LLM context
+_AI_PROMPT_PREVIEW_LENGTH = 200
 
 
 def _strip_json_fences(text: str) -> str:
@@ -146,6 +150,53 @@ class UniversalLLMParser(LLMParser):
             "enabled" if scan_for_secrets else "disabled",
         )
 
+    def _build_source_context(self, sources: CommentSources) -> str:
+        """Build context string describing detected sources for LLM prompt.
+
+        This method formats information about detected structured blocks in
+        the comment to help the LLM prioritize extraction from authoritative
+        sources (like AI prompt blocks) over natural language inference.
+
+        Args:
+            sources: CommentSources from extract_comment_sources()
+
+        Returns:
+            Formatted string describing detected blocks for LLM context.
+            Returns a fallback message when no structured blocks are detected.
+        """
+        if not sources.has_any_blocks:
+            return (
+                "No structured blocks detected. "
+                "Relying on natural language parsing (lower confidence)."
+            )
+
+        parts: list[str] = []
+
+        if sources.ai_prompt_blocks:
+            count = len(sources.ai_prompt_blocks)
+            parts.append(
+                f"✓ {count} AI Prompt block(s) detected - HIGHEST PRIORITY (confidence >= 0.95)"
+            )
+            # Include first AI prompt content preview for context
+            first_prompt = sources.ai_prompt_blocks[0]
+            if first_prompt.content:
+                preview = first_prompt.content[:_AI_PROMPT_PREVIEW_LENGTH]
+                if len(first_prompt.content) > _AI_PROMPT_PREVIEW_LENGTH:
+                    preview += "..."
+                parts.append(f"  AI Instructions: {preview}")
+
+        if sources.suggestion_blocks:
+            count = len(sources.suggestion_blocks)
+            parts.append(f"✓ {count} suggestion block(s) detected")
+
+        if sources.diff_blocks:
+            count = len(sources.diff_blocks)
+            has_hunk = any(b.has_hunk_header for b in sources.diff_blocks)
+            hunk_note = " (with hunk headers)" if has_hunk else ""
+            parts.append(f"✓ {count} diff block(s) detected{hunk_note}")
+
+        return "\n".join(parts)
+
     def parse_comment(
         self,
         comment_body: str,
@@ -233,12 +284,26 @@ class UniversalLLMParser(LLMParser):
                 else (line_number if line_number is not None else 0)
             )
 
-            # Build prompt with context (now includes start_line and end_line)
+            # Detect structured blocks in comment (Issue #300)
+            sources = extract_comment_sources(comment_body)
+            detected_sources_text = self._build_source_context(sources)
+
+            # Log if AI prompt detected for debugging/monitoring
+            if sources.has_ai_prompt:
+                logger.info(
+                    "AI Prompt block detected in comment for %s:%s-%s",
+                    file_path or "unknown",
+                    effective_start,
+                    effective_end,
+                )
+
+            # Build prompt with context (now includes start_line, end_line, and detected_sources)
             prompt = PARSE_COMMENT_PROMPT.format(
                 comment_body=comment_body,
                 file_path=file_path or "unknown",
                 start_line=effective_start,
                 end_line=effective_end,
+                detected_sources=detected_sources_text,
             )
 
             if logger.isEnabledFor(logging.DEBUG):
