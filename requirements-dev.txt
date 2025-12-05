@@ -485,9 +485,9 @@ httpx==0.28.1 \
     # via
     #   anthropic
     #   openai
-hypothesis==6.148.6 \
-    --hash=sha256:0ef1381f893650590f2c5918318d4c8240c79e481bbb621a49acc3dba868d80f \
-    --hash=sha256:126325f3e84f297d7cce5071ebe1f38744fbc54493ca0adf294d6fa1034e5efc
+hypothesis==6.148.7 \
+    --hash=sha256:94dbd58ebf259afa3bafb1d3bf5761ac1bde6f1477de494798cbf7960aabbdee \
+    --hash=sha256:b96e817e715c5b1a278411e3b9baf6d599d5b12207ba25e41a8f066929f6c2a6
     # via review-bot-automator (pyproject.toml)
 id==1.5.0 \
     --hash=sha256:292cb8a49eacbbdbce97244f47a97b4c62540169c976552e497fd57df0734c1d \

@@ -63,7 +63,7 @@ text = "MIT"
 dev = [
     "pytest==9.0.1",
     "pytest-cov==7.0.0",
-    "hypothesis==6.148.6",
+    "hypothesis==6.148.7",
     "black==25.11.0",
     "ruff==0.14.8",
     "mypy==1.19.0",
