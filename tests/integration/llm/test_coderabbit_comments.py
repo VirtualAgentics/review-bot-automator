@@ -23,7 +23,7 @@ from review_bot_automator.llm.comment_sources import (
 # =============================================================================
 
 # Comment 1: Line ordering validation nitpick
-# Contains: diff block with @@ hunk header AND AI prompt block
+# Contains: diff block without @@ hunk header AND AI prompt block
 PR_286_LINE_ORDERING_COMMENT = """_🧹 Nitpick_ | _🔵 Trivial_
 
 **Consider validating line range ordering.**
@@ -369,3 +369,7 @@ class TestDetailsBlockClassification:
         # Robot emoji (🤖) should trigger AI prompt detection
         assert sources.has_ai_prompt
         assert "🤖" in sources.ai_prompt_blocks[0].summary
+
+        # Verify classification behavior (per CodeRabbit review)
+        details_types = {d.block_type for d in sources.details_blocks}
+        assert DetailsBlockType.AI_PROMPT in details_types
