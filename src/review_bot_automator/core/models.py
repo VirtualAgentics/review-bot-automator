@@ -59,7 +59,7 @@ Validation points:
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict
 
 if TYPE_CHECKING:
     from review_bot_automator.llm.metrics import LLMMetrics
@@ -95,6 +95,8 @@ class ChangeMetadata(TypedDict, total=False):
 
 # Type aliases for clarity and strict typing
 LineRange: TypeAlias = tuple[int, int]
+ChangeType: TypeAlias = Literal["addition", "modification", "deletion"]
+VALID_CHANGE_TYPES: frozenset[str] = frozenset({"addition", "modification", "deletion"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +109,7 @@ class Change:
         - parsing_method: How the change was parsed ("regex" or "llm")
         - change_rationale: Explanation of why this change was suggested
         - risk_level: Risk assessment ("low", "medium", "high")
+        - change_type: Type of change ("addition", "modification", "deletion")
 
     All new fields have default values for backward compatibility.
 
@@ -144,6 +147,7 @@ class Change:
     parsing_method: str = "regex"
     change_rationale: str | None = None
     risk_level: str | None = None
+    change_type: ChangeType = "modification"
 
     def __post_init__(self) -> None:
         """Validate Change field values.
@@ -168,6 +172,13 @@ class Change:
                 raise ValueError(
                     f"risk_level must be one of {valid_risk_levels}, got {self.risk_level!r}"
                 )
+
+        # Validate change_type is a valid value
+        valid_change_types = {"addition", "modification", "deletion"}
+        if self.change_type not in valid_change_types:
+            raise ValueError(
+                f"change_type must be one of {valid_change_types}, got {self.change_type!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,7 +15,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.handlers.base import BaseHandler
 from review_bot_automator.security.input_validator import InputValidator
 from review_bot_automator.utils.path_utils import resolve_file_path
@@ -29,7 +29,22 @@ except ImportError:
 
 
 class TomlHandler(BaseHandler):
-    """Handler for TOML files with structure validation."""
+    """Handler for TOML files with structure validation.
+
+    Note: Suggestions must be self-contained, complete TOML documents. Partial
+    fragments (e.g., a key without its table header) will be rejected during
+    validation. This validation occurs before the merge operation.
+
+    Example valid suggestion::
+
+        [tool.poetry]
+        name = "my-project"
+        version = "1.0.0"
+
+    Example invalid suggestion (fragment without table header)::
+
+        name = "my-project"  # Invalid: missing [tool.poetry] header
+    """
 
     _warned_about_temp_workspace: bool
 
@@ -70,22 +85,33 @@ class TomlHandler(BaseHandler):
         """
         return file_path.lower().endswith(".toml")
 
-    def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
-        """Apply a TOML suggestion to the file using targeted line-based replacement.
+    def apply_change(
+        self,
+        path: str,
+        content: str,
+        start_line: int,
+        end_line: int,
+        change_type: ChangeType = "modification",
+    ) -> bool:
+        """Apply a TOML change to the file based on change_type.
 
-        Performs secure path validation, validates the suggestion as proper TOML, then performs
-        a targeted in-place edit by replacing only the specified line range with the formatted
-        suggestion content. This preserves all original formatting, comments, and section ordering
-        outside the target region.
+        Performs secure path validation, validates the suggestion as proper TOML, then applies
+        the change according to its type. This preserves all original formatting, comments, and
+        section ordering outside the target region.
 
         Args:
             path (str): Filesystem path to the TOML file to modify. Must pass security validation.
-            content (str): TOML-formatted suggestion content to insert at the target region.
-            start_line (int): One-based start line of the region to replace (inclusive).
-            end_line (int): One-based end line of the region to replace (inclusive).
+            content (str): TOML-formatted suggestion content. For modifications and additions,
+                this is inserted. For deletions, this is ignored.
+            start_line (int): One-based start line of the region (inclusive).
+            end_line (int): One-based end line of the region (inclusive).
+            change_type (str): Type of change to apply. One of:
+                - "modification": Replace lines start_line to end_line with content (default).
+                - "addition": Insert content AFTER end_line, preserving all existing lines.
+                - "deletion": Remove lines start_line to end_line, content is ignored.
 
         Returns:
-            bool: True if the suggestion was applied successfully; False if validation
+            bool: True if the change was applied successfully; False if validation
                 fails (e.g., path traversal detected, invalid TOML syntax).
                 When returning False, the method logs an error message with details.
 
@@ -180,23 +206,42 @@ class TomlHandler(BaseHandler):
                 f"end_line={end_line} > total_lines={total_lines}"
             )
 
-        # Validate suggestion is proper TOML
-        try:
-            tomllib.loads(content)
-        except tomllib.TOMLDecodeError as e:
-            self.logger.error(f"Error parsing TOML suggestion: {e}")
+        # Validate change_type
+        valid_change_types = {"addition", "modification", "deletion"}
+        if change_type not in valid_change_types:
+            self.logger.error(
+                f"Invalid change_type {change_type!r}; must be one of {valid_change_types}"
+            )
             return False
 
-        # Format suggestion for insertion (ensure proper line endings)
-        formatted_suggestion = self._format_suggestion_for_insertion(content)
-
-        # Perform targeted line replacement (validated 1-based indices, converted to 0-based)
-        # Replace lines [start_line-1, end_line) with the formatted suggestion
-        new_lines = (
-            original_lines[: start_line - 1]  # Lines before the target region
-            + formatted_suggestion  # New content
-            + original_lines[end_line:]  # Lines after the target region
-        )
+        # Apply change based on change_type
+        if change_type == "deletion":
+            # Deletion: remove lines start_line to end_line, ignore content
+            new_lines = original_lines[: start_line - 1] + original_lines[end_line:]
+        elif change_type == "addition":
+            # Addition: insert content AFTER end_line, preserving all existing lines
+            # Validate suggestion is proper TOML
+            try:
+                tomllib.loads(content)
+            except tomllib.TOMLDecodeError as e:
+                self.logger.error(f"Error parsing TOML suggestion: {e}")
+                return False
+            formatted_suggestion = self._format_suggestion_for_insertion(content)
+            new_lines = original_lines[:end_line] + formatted_suggestion + original_lines[end_line:]
+        else:  # modification (default)
+            # Modification: replace lines start_line to end_line with content
+            # Validate suggestion is proper TOML
+            try:
+                tomllib.loads(content)
+            except tomllib.TOMLDecodeError as e:
+                self.logger.error(f"Error parsing TOML suggestion: {e}")
+                return False
+            formatted_suggestion = self._format_suggestion_for_insertion(content)
+            new_lines = (
+                original_lines[: start_line - 1]  # Lines before the target region
+                + formatted_suggestion  # New content
+                + original_lines[end_line:]  # Lines after the target region
+            )
 
         # Join lines and write atomically with preserved permissions
         merged_content = "".join(new_lines)

@@ -17,7 +17,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any, TypeAlias
 
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.handlers.base import BaseHandler
 from review_bot_automator.security.input_validator import InputValidator
 from review_bot_automator.utils.path_utils import resolve_file_path
@@ -47,8 +47,15 @@ class JsonHandler(BaseHandler):
         """
         return file_path.lower().endswith(".json")
 
-    def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
-        """Apply a JSON suggestion to a file, merging and validating to prevent duplicate keys.
+    def apply_change(
+        self,
+        path: str,
+        content: str,
+        start_line: int,
+        end_line: int,
+        change_type: ChangeType = "modification",
+    ) -> bool:
+        """Apply a JSON change to a file based on change_type.
 
         This method implements security validation to prevent path traversal attacks and
         ensures safe JSON processing. Path validation occurs before any file operations.
@@ -67,6 +74,10 @@ class JsonHandler(BaseHandler):
                 contextual hint for merging).
             end_line (int): End line of the suggestion in the original file (used as
                 contextual hint for merging).
+            change_type (str): Type of change to apply. One of:
+                - "modification": Merge suggestion into original JSON (default).
+                - "addition": Same as modification for JSON (keys are added/merged).
+                - "deletion": Remove keys specified in content from the JSON file.
 
         Returns:
             bool: `True` if the file was successfully updated with the merged JSON,
@@ -147,10 +158,25 @@ class JsonHandler(BaseHandler):
                 self.logger.error("Partial suggestion not supported for non-dict JSON")
                 return False
 
-        # Handle dict vs non-dict JSON
+        # Validate change_type
+        valid_change_types = {"addition", "modification", "deletion"}
+        if change_type not in valid_change_types:
+            self.logger.error(
+                f"Invalid change_type {change_type!r}; must be one of {valid_change_types}"
+            )
+            return False
+
+        # Handle change_type and dict vs non-dict JSON
         merged_data: dict[str, Any] | list[Any] | str | int | float | bool | None
-        if isinstance(suggestion_value, dict) and isinstance(original_value, dict):
-            # Dict+dict: merge
+        if change_type == "deletion":
+            # Deletion: remove keys specified in content from original
+            if isinstance(suggestion_value, dict) and isinstance(original_value, dict):
+                merged_data = {k: v for k, v in original_value.items() if k not in suggestion_value}
+            else:
+                self.logger.error("JSON deletion requires both original and content to be dicts")
+                return False
+        elif isinstance(suggestion_value, dict) and isinstance(original_value, dict):
+            # Dict+dict: merge (both modification and addition)
             merged_data = self._smart_merge_json(
                 original_value, suggestion_value, start_line, end_line
             )

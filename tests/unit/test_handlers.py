@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from review_bot_automator import FileType, JsonHandler, TomlHandler, YamlHandler
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.handlers.base import BaseHandler
 from review_bot_automator.handlers.yaml_handler import YAMLValue
 
@@ -135,6 +135,75 @@ class TestJsonHandler:
         # Partial object
         suggestion = {"key1": "value1"}
         assert handler._is_complete_object(suggestion, original) is False
+
+    def test_apply_change_deletion_removes_keys(self, tmp_path: Path) -> None:
+        """Test JSON deletion removes specified keys from original."""
+        handler = JsonHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.json"
+        target.write_text('{"keep": "value1", "remove": "value2"}', encoding="utf-8")
+
+        # Delete the "remove" key
+        result = handler.apply_change(
+            str(target), '{"remove": "ignored"}', 1, 1, change_type="deletion"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert '"keep"' in content
+        assert '"remove"' not in content
+
+    def test_apply_change_addition_merges_keys(self, tmp_path: Path) -> None:
+        """Test JSON addition merges new keys into original."""
+        handler = JsonHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.json"
+        target.write_text('{"existing": "value1"}', encoding="utf-8")
+
+        # Add new key with addition type
+        result = handler.apply_change(
+            str(target), '{"new_key": "value2"}', 1, 1, change_type="addition"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert '"existing"' in content
+        assert '"new_key"' in content
+
+    def test_apply_change_modification_merges_keys(self, tmp_path: Path) -> None:
+        """Test JSON modification (default) merges and overrides keys."""
+        handler = JsonHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.json"
+        target.write_text('{"key1": "old", "key2": "keep"}', encoding="utf-8")
+
+        # Modify with merge
+        result = handler.apply_change(
+            str(target), '{"key1": "new", "key3": "added"}', 1, 1, change_type="modification"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert '"key1": "new"' in content
+        assert '"key2"' in content
+        assert '"key3"' in content
+
+    def test_apply_change_invalid_change_type_returns_false(self, tmp_path: Path) -> None:
+        """Test JSON handler returns False for invalid change_type."""
+        handler = JsonHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.json"
+        target.write_text('{"key": "value"}', encoding="utf-8")
+
+        result = handler.apply_change(
+            str(target), '{"key": "new"}', 1, 1, change_type="invalid"  # type: ignore[arg-type]
+        )
+        assert result is False
+
+    def test_apply_change_deletion_with_non_dict_json_returns_false(self, tmp_path: Path) -> None:
+        """Test JSON deletion fails when original is not a dict (e.g., list)."""
+        handler = JsonHandler(workspace_root=tmp_path)
+        target = tmp_path / "array.json"
+        target.write_text('["item1", "item2"]', encoding="utf-8")
+
+        # Attempt to delete from a list (should fail - deletion requires dicts)
+        result = handler.apply_change(
+            str(target), '{"key": "ignored"}', 1, 1, change_type="deletion"
+        )
+        assert result is False
 
 
 class TestYamlHandler:
@@ -372,6 +441,73 @@ class TestYamlHandler:
             keys = handler._extract_keys(data)
             assert "anchor" in keys
             assert "alias" in keys
+
+    def test_apply_change_deletion_removes_keys(self, tmp_path: Path) -> None:
+        """Test YAML deletion removes specified keys from original."""
+        handler = YamlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.yaml"
+        target.write_text("keep: value1\nremove: value2\n", encoding="utf-8")
+
+        # Delete the "remove" key
+        result = handler.apply_change(
+            str(target), "remove: ignored\n", 1, 2, change_type="deletion"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert "keep:" in content
+        assert "remove:" not in content
+
+    def test_apply_change_addition_merges_keys(self, tmp_path: Path) -> None:
+        """Test YAML addition merges new keys into original."""
+        handler = YamlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.yaml"
+        target.write_text("existing: value1\n", encoding="utf-8")
+
+        # Add new key with addition type
+        result = handler.apply_change(
+            str(target), "new_key: value2\n", 1, 1, change_type="addition"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert "existing:" in content
+        assert "new_key:" in content
+
+    def test_apply_change_modification_merges_keys(self, tmp_path: Path) -> None:
+        """Test YAML modification (default) merges and overrides keys."""
+        handler = YamlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.yaml"
+        target.write_text("key1: old\nkey2: keep\n", encoding="utf-8")
+
+        # Modify with merge
+        result = handler.apply_change(
+            str(target), "key1: new\nkey3: added\n", 1, 2, change_type="modification"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert "key1: new" in content
+        assert "key2:" in content
+        assert "key3:" in content
+
+    def test_apply_change_invalid_change_type_returns_false(self, tmp_path: Path) -> None:
+        """Test YAML handler returns False for invalid change_type."""
+        handler = YamlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.yaml"
+        target.write_text("key: value\n", encoding="utf-8")
+
+        result = handler.apply_change(
+            str(target), "key: new\n", 1, 1, change_type="invalid"  # type: ignore[arg-type]
+        )
+        assert result is False
+
+    def test_apply_change_deletion_with_non_dict_yaml_returns_false(self, tmp_path: Path) -> None:
+        """Test YAML deletion fails when original is not a dict (e.g., list)."""
+        handler = YamlHandler(workspace_root=tmp_path)
+        target = tmp_path / "array.yaml"
+        target.write_text("- item1\n- item2\n", encoding="utf-8")
+
+        # Attempt to delete from a list (should fail - deletion requires dicts)
+        result = handler.apply_change(str(target), "key: ignored\n", 1, 2, change_type="deletion")
+        assert result is False
 
 
 class TestTomlHandler:
@@ -637,6 +773,80 @@ class TestTomlHandler:
             with subtests.test(msg=f"Section: {expected_section}", section=expected_section):
                 assert expected_section in sections
 
+    def test_apply_change_deletion_removes_lines(self, tmp_path: Path) -> None:
+        """Test TOML deletion removes specified lines."""
+        handler = TomlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.toml"
+        target.write_text(
+            'keep = "value1"\nremove = "value2"\nafter = "value3"\n', encoding="utf-8"
+        )
+
+        # Delete line 2 (remove = "value2")
+        result = handler.apply_change(
+            str(target), 'ignored = "content"', 2, 2, change_type="deletion"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert 'keep = "value1"' in content
+        assert 'remove = "value2"' not in content
+        assert 'after = "value3"' in content
+
+    def test_apply_change_addition_inserts_lines(self, tmp_path: Path) -> None:
+        """Test TOML addition inserts lines after specified position."""
+        handler = TomlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.toml"
+        target.write_text('line1 = "value1"\nline2 = "value2"\n', encoding="utf-8")
+
+        # Add new line after line 1
+        result = handler.apply_change(str(target), 'inserted = "new"', 1, 1, change_type="addition")
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        lines = content.strip().split("\n")
+        # Line 1 should be line1, line 2 should be inserted, line 3 should be line2
+        assert 'line1 = "value1"' in lines[0]
+        assert 'inserted = "new"' in lines[1]
+        assert 'line2 = "value2"' in lines[2]
+
+    def test_apply_change_modification_replaces_lines(self, tmp_path: Path) -> None:
+        """Test TOML modification replaces specified lines."""
+        handler = TomlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.toml"
+        target.write_text('before = "keep"\nreplace = "old"\nafter = "keep"\n', encoding="utf-8")
+
+        # Replace line 2
+        result = handler.apply_change(
+            str(target), 'replace = "new"', 2, 2, change_type="modification"
+        )
+        assert result is True
+        content = target.read_text(encoding="utf-8")
+        assert 'before = "keep"' in content
+        assert 'replace = "new"' in content
+        assert 'replace = "old"' not in content
+        assert 'after = "keep"' in content
+
+    def test_apply_change_invalid_change_type_returns_false(self, tmp_path: Path) -> None:
+        """Test TOML handler returns False for invalid change_type."""
+        handler = TomlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.toml"
+        target.write_text('key = "value"\n', encoding="utf-8")
+
+        result = handler.apply_change(
+            str(target), 'key = "new"', 1, 1, change_type="invalid"  # type: ignore[arg-type]
+        )
+        assert result is False
+
+    def test_apply_change_addition_with_invalid_toml_returns_false(self, tmp_path: Path) -> None:
+        """Test TOML addition fails when content is not valid TOML syntax."""
+        handler = TomlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.toml"
+        target.write_text('[section]\nkey = "value"\n', encoding="utf-8")
+
+        # Attempt to add invalid TOML syntax (missing closing quote)
+        result = handler.apply_change(
+            str(target), 'new_key = "unclosed', 2, 2, change_type="addition"
+        )
+        assert result is False
+
 
 @pytest.fixture
 def test_handler(tmp_path: Path) -> BaseHandler:
@@ -646,7 +856,14 @@ def test_handler(tmp_path: Path) -> BaseHandler:
         def can_handle(self, file_path: str) -> bool:
             return True
 
-        def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
+        def apply_change(
+            self,
+            path: str,
+            content: str,
+            start_line: int,
+            end_line: int,
+            change_type: ChangeType = "modification",
+        ) -> bool:
             return True
 
         def validate_change(

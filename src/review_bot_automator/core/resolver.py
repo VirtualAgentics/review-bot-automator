@@ -646,6 +646,7 @@ class ConflictResolver:
             parsing_method="llm",
             change_rationale=parsed_change.rationale,
             risk_level=parsed_change.risk_level,
+            change_type=parsed_change.change_type,
         )
 
     def detect_conflicts(self, changes: list[Change]) -> list[Conflict]:
@@ -1302,18 +1303,25 @@ class ConflictResolver:
             return self._apply_plaintext_change(change)
 
         # Use specialized handler
-        return handler.apply_change(change.path, change.content, change.start_line, change.end_line)
+        return handler.apply_change(
+            change.path,
+            change.content,
+            change.start_line,
+            change.end_line,
+            change_type=change.change_type,
+        )
 
     def _apply_plaintext_change(self, change: Change) -> bool:
-        """Apply a plaintext file change by replacing the specified line range.
+        """Apply a plaintext file change based on change_type.
 
-        The function reads the target file, replaces lines from `change.start_line` to
-        `change.end_line` (1-based, inclusive) with `change.content`, clamps out-of-range indices
-        to the file bounds, ensures the file ends with a newline, and writes the result back.
+        The function reads the target file and applies the change according to its type:
+        - modification (default): Replace lines from `start_line` to `end_line` with `content`
+        - addition: Insert `content` AFTER `end_line`, preserving all existing lines
+        - deletion: Remove lines from `start_line` to `end_line`, ignoring `content`
 
         Args:
             change (Change): Change describing the target `path`, 1-based `start_line` and
-                `end_line`, and the replacement `content`.
+                `end_line`, the replacement `content`, and `change_type`.
 
         Returns:
             bool: True if the file was successfully updated, False otherwise.
@@ -1366,10 +1374,28 @@ class ConflictResolver:
             if end_idx > len(lines):
                 end_idx = len(lines)
 
-            # Restore indentation if LLM stripped it (Issue #287)
-            replacement = restore_indentation(lines, replacement, start_idx)
+            # Validate change_type (defense-in-depth; Change model validates too)
+            valid_change_types = {"addition", "modification", "deletion"}
+            if change.change_type not in valid_change_types:
+                self.logger.error(f"Invalid change_type {change.change_type!r} for {change.path}")
+                return False
 
-            new_lines = lines[:start_idx] + replacement + lines[end_idx:]
+            # Apply change based on type
+            if change.change_type == "deletion":
+                # Remove lines start_line to end_line, ignore content
+                new_lines = lines[:start_idx] + lines[end_idx:]
+            elif change.change_type == "addition":
+                # Insert content AFTER end_line, preserving all existing lines
+                # Use end_idx as reference for indentation (the line we insert after)
+                # Bounds check: ensure indent_ref is never negative and stays within lines
+                indent_ref = min(max(end_idx - 1, 0), len(lines) - 1) if lines else 0
+                replacement = restore_indentation(lines, replacement, indent_ref)
+                new_lines = lines[:end_idx] + replacement + lines[end_idx:]
+            else:  # modification (default)
+                # Replace lines start_line to end_line with content
+                # Restore indentation if LLM stripped it (Issue #287)
+                replacement = restore_indentation(lines, replacement, start_idx)
+                new_lines = lines[:start_idx] + replacement + lines[end_idx:]
             new_text = "\n".join(new_lines) + "\n"
 
             # Atomic write with permission preservation

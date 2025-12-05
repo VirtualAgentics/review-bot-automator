@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+* **Handler API**: `BaseHandler.apply_change()` now accepts a `change_type` parameter
+  (`Literal["addition", "modification", "deletion"]`). Custom handlers subclassing
+  `BaseHandler` must update their method signatures to include this parameter with
+  a default value of `"modification"`. (#312)
+
+### Added
+
+* **Type Alias**: New `ChangeType` type alias in `review_bot_automator.core.models`
+  centralizes the change type definition for consistency across handlers, models,
+  and LLM components. (#312)
+
 ## [2.0.2] - 2025-12-04
 
 ### Fixed

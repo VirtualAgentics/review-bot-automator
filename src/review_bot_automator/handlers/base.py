@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from os import PathLike
 from pathlib import Path
 
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.security.input_validator import InputValidator
 from review_bot_automator.utils.path_utils import resolve_file_path
 
@@ -47,14 +47,27 @@ class BaseHandler(ABC):
         """
 
     @abstractmethod
-    def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
-        """Apply a replacement to a file's line range.
+    def apply_change(
+        self,
+        path: str,
+        content: str,
+        start_line: int,
+        end_line: int,
+        change_type: ChangeType = "modification",
+    ) -> bool:
+        """Apply a change to a file based on the change type.
 
         Args:
             path (str): Path to the target file.
-            content (str): New content to insert in place of the specified lines.
+            content (str): Content to apply. For modifications and additions, this is
+                the new content. For deletions, this is ignored.
             start_line (int): 1-indexed starting line number (inclusive).
             end_line (int): 1-indexed ending line number (inclusive).
+            change_type (str): Type of change to apply. One of:
+                - "modification": Replace lines start_line to end_line with content
+                  (default, backward compatible behavior).
+                - "addition": Insert content AFTER end_line, preserving existing lines.
+                - "deletion": Remove lines start_line to end_line, content is ignored.
 
         Returns:
             bool: `True` if the change was applied successfully, `False` otherwise.
@@ -62,6 +75,9 @@ class BaseHandler(ABC):
         Raises:
             IOError: If the file cannot be read or written.
             ValueError: If the provided line numbers are invalid.
+
+        Note:
+            Invalid change_type values are logged and return False rather than raising.
         """
 
     @abstractmethod

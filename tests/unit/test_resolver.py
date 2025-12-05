@@ -633,3 +633,190 @@ class TestConflictResolver:
 
                 assert is_valid is False
                 assert "Validation error" in reason
+
+
+class TestPlaintextChangeType:
+    """Test plaintext change_type handling in resolver._apply_plaintext_change."""
+
+    def test_apply_plaintext_change_deletion(self, temp_workspace: Path) -> None:
+        """Test plaintext deletion removes specified lines."""
+        test_file = temp_workspace / "test.txt"
+        test_file.write_text("line1\nline2\nline3\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=2,
+            end_line=2,
+            content="ignored content",
+            metadata={},
+            fingerprint="fp1",
+            file_type=FileType.PLAINTEXT,
+            change_type="deletion",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        assert "line1" in content
+        assert "line2" not in content
+        assert "line3" in content
+
+    def test_apply_plaintext_change_addition(self, temp_workspace: Path) -> None:
+        """Test plaintext addition inserts lines after specified position."""
+        test_file = temp_workspace / "test.txt"
+        test_file.write_text("line1\nline2\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=1,
+            end_line=1,
+            content="inserted",
+            metadata={},
+            fingerprint="fp1",
+            file_type=FileType.PLAINTEXT,
+            change_type="addition",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        lines = content.strip().split("\n")
+        assert lines[0] == "line1"
+        assert "inserted" in lines[1]
+        assert lines[2] == "line2"
+
+    def test_apply_plaintext_change_modification(self, temp_workspace: Path) -> None:
+        """Test plaintext modification (default) replaces specified lines."""
+        test_file = temp_workspace / "test.txt"
+        test_file.write_text("line1\nold_line\nline3\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=2,
+            end_line=2,
+            content="new_line",
+            metadata={},
+            fingerprint="fp1",
+            file_type=FileType.PLAINTEXT,
+            change_type="modification",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        assert "line1" in content
+        assert "new_line" in content
+        assert "old_line" not in content
+        assert "line3" in content
+
+    def test_apply_plaintext_change_invalid_type_returns_false(self, temp_workspace: Path) -> None:
+        """Test plaintext handler returns False for invalid change_type."""
+        test_file = temp_workspace / "test.txt"
+        test_file.write_text("line1\nline2\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        # Use object.__new__ to bypass Change validation for testing
+        change = object.__new__(Change)
+        object.__setattr__(change, "path", str(test_file))
+        object.__setattr__(change, "start_line", 1)
+        object.__setattr__(change, "end_line", 1)
+        object.__setattr__(change, "content", "new")
+        object.__setattr__(change, "metadata", {})
+        object.__setattr__(change, "fingerprint", "fp1")
+        object.__setattr__(change, "file_type", FileType.PLAINTEXT)
+        object.__setattr__(change, "change_type", "invalid_type")
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is False
+
+    def test_apply_plaintext_change_addition_at_top_of_file(self, temp_workspace: Path) -> None:
+        """Test addition change type with end_line=0 (insert at top of file).
+
+        This tests the indent_ref bounds fix at resolver.py:1391 where end_idx - 1
+        could be negative when end_line is 0.
+        """
+        test_file = temp_workspace / "test.txt"
+        test_file.write_text("existing_line1\nexisting_line2\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=0,
+            end_line=0,
+            content="new_line_at_top",
+            metadata={},
+            fingerprint="fp_top",
+            file_type=FileType.PLAINTEXT,
+            change_type="addition",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        # New line should be at the top, followed by original content
+        assert "new_line_at_top" in content
+        assert "existing_line1" in content
+        assert "existing_line2" in content
+
+    def test_apply_plaintext_change_start_line_beyond_file_returns_false(
+        self, temp_workspace: Path
+    ) -> None:
+        """Test that start_line beyond file length returns False."""
+        test_file = temp_workspace / "short.txt"
+        test_file.write_text("line1\nline2\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=100,  # Beyond file length
+            end_line=100,
+            content="new_content",
+            metadata={},
+            fingerprint="fp_beyond",
+            file_type=FileType.PLAINTEXT,
+            change_type="modification",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is False
+
+    def test_apply_plaintext_change_end_line_beyond_file_clamps(self, temp_workspace: Path) -> None:
+        """Test that end_line beyond file length is clamped to file end."""
+        test_file = temp_workspace / "clamp.txt"
+        test_file.write_text("line1\nline2\nline3\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=2,
+            end_line=100,  # Beyond file length, should clamp to 3
+            content="replacement",
+            metadata={},
+            fingerprint="fp_clamp",
+            file_type=FileType.PLAINTEXT,
+            change_type="modification",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        # Line 1 preserved, lines 2-3 replaced
+        assert "line1" in content
+        assert "replacement" in content
+        assert "line2" not in content
+        assert "line3" not in content
