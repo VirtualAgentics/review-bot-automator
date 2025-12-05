@@ -738,3 +738,34 @@ class TestPlaintextChangeType:
 
         result = resolver._apply_plaintext_change(change)
         assert result is False
+
+    def test_apply_plaintext_change_addition_at_top_of_file(self, temp_workspace: Path) -> None:
+        """Test addition change type with end_line=0 (insert at top of file).
+
+        This tests the indent_ref bounds fix at resolver.py:1391 where end_idx - 1
+        could be negative when end_line is 0.
+        """
+        test_file = temp_workspace / "test.txt"
+        test_file.write_text("existing_line1\nexisting_line2\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=0,
+            end_line=0,
+            content="new_line_at_top",
+            metadata={},
+            fingerprint="fp_top",
+            file_type=FileType.PLAINTEXT,
+            change_type="addition",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        # New line should be at the top, followed by original content
+        assert "new_line_at_top" in content
+        assert "existing_line1" in content
+        assert "existing_line2" in content

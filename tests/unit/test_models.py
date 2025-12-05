@@ -6,6 +6,7 @@ import pytest
 
 from review_bot_automator.core.models import (
     Change,
+    ChangeType,
     Conflict,
     FileType,
     Resolution,
@@ -360,7 +361,7 @@ def test_change_type_default_is_modification() -> None:
 
 
 @pytest.mark.parametrize("change_type", ["addition", "modification", "deletion"])
-def test_change_type_valid_values(change_type: str) -> None:
+def test_change_type_valid_values(change_type: ChangeType) -> None:
     """Test Change accepts all valid change_type values (Issue #312)."""
     change = Change(
         path="test.py",
@@ -370,7 +371,7 @@ def test_change_type_valid_values(change_type: str) -> None:
         metadata={},
         fingerprint=f"fp_{change_type}",
         file_type=FileType.PYTHON,
-        change_type=change_type,  # type: ignore[arg-type]
+        change_type=change_type,
     )
     assert change.change_type == change_type
 

@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from review_bot_automator import FileType, JsonHandler, TomlHandler, YamlHandler
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.handlers.base import BaseHandler
 from review_bot_automator.handlers.yaml_handler import YAMLValue
 
@@ -828,7 +828,7 @@ def test_handler(tmp_path: Path) -> BaseHandler:
             content: str,
             start_line: int,
             end_line: int,
-            change_type: str = "modification",
+            change_type: ChangeType = "modification",
         ) -> bool:
             return True
 

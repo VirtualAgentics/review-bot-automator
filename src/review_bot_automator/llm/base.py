@@ -12,7 +12,8 @@ Phase 1: Provider and parser implementations build on these foundations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Literal
+
+from review_bot_automator.core.models import ChangeType
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +53,7 @@ class ParsedChange:
     start_line: int
     end_line: int
     new_content: str
-    change_type: Literal["addition", "modification", "deletion"]
+    change_type: ChangeType
     confidence: float
     rationale: str
     risk_level: str = "low"

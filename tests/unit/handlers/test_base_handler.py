@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.handlers.base import BaseHandler
 
 
@@ -21,7 +21,7 @@ class ConcreteHandler(BaseHandler):
         content: str,
         start_line: int,
         end_line: int,
-        change_type: str = "modification",
+        change_type: ChangeType = "modification",
     ) -> bool:
         """Stub implementation."""
         return True

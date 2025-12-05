@@ -15,9 +15,8 @@ import uuid
 from abc import ABC, abstractmethod
 from os import PathLike
 from pathlib import Path
-from typing import Literal
 
-from review_bot_automator.core.models import Change, Conflict
+from review_bot_automator.core.models import Change, ChangeType, Conflict
 from review_bot_automator.security.input_validator import InputValidator
 from review_bot_automator.utils.path_utils import resolve_file_path
 
@@ -54,7 +53,7 @@ class BaseHandler(ABC):
         content: str,
         start_line: int,
         end_line: int,
-        change_type: Literal["addition", "modification", "deletion"] = "modification",
+        change_type: ChangeType = "modification",
     ) -> bool:
         """Apply a change to a file based on the change type.
 

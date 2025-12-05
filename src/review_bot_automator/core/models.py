@@ -95,6 +95,8 @@ class ChangeMetadata(TypedDict, total=False):
 
 # Type aliases for clarity and strict typing
 LineRange: TypeAlias = tuple[int, int]
+ChangeType: TypeAlias = Literal["addition", "modification", "deletion"]
+VALID_CHANGE_TYPES: frozenset[str] = frozenset({"addition", "modification", "deletion"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +147,7 @@ class Change:
     parsing_method: str = "regex"
     change_rationale: str | None = None
     risk_level: str | None = None
-    change_type: Literal["addition", "modification", "deletion"] = "modification"
+    change_type: ChangeType = "modification"
 
     def __post_init__(self) -> None:
         """Validate Change field values.
