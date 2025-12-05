@@ -152,6 +152,7 @@ ignore = [
     "S603",  # subprocess calls in integration tests are intentional
     "S607",  # partial executable paths (git commands) are intentional
     "D",
+    "E501",  # long lines in test fixtures with real data are acceptable
     "RUF043",  # regex patterns in pytest.raises are ok
 ]
 "fuzz/**/*.py" = [
