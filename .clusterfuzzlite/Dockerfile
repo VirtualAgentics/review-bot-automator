@@ -7,7 +7,7 @@
 # Python Version: 3.11.13 (OSS-Fuzz base image - Atheris doesn't support Python 3.12 yet)
 # Atheris Version: 2.3.0 (pre-installed in base image)
 
-FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:521cad67b616c3ad22faab29b4c721e6f9cb4236bfb4e9b471fe7b0dc80ac43a
+FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:ac66c90b8a54ac3ba47df071de00f31a63116d7fcb9968795aef87cbc22e557c
 
 # Copy local repository (ClusterFuzzLite tests PR code directly)
 # For OSS-Fuzz: Replace this with: RUN git clone --depth 1 https://github.com/VirtualAgentics/coderabbit-conflict-resolver
