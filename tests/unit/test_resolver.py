@@ -769,3 +769,54 @@ class TestPlaintextChangeType:
         assert "new_line_at_top" in content
         assert "existing_line1" in content
         assert "existing_line2" in content
+
+    def test_apply_plaintext_change_start_line_beyond_file_returns_false(
+        self, temp_workspace: Path
+    ) -> None:
+        """Test that start_line beyond file length returns False."""
+        test_file = temp_workspace / "short.txt"
+        test_file.write_text("line1\nline2\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=100,  # Beyond file length
+            end_line=100,
+            content="new_content",
+            metadata={},
+            fingerprint="fp_beyond",
+            file_type=FileType.PLAINTEXT,
+            change_type="modification",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is False
+
+    def test_apply_plaintext_change_end_line_beyond_file_clamps(self, temp_workspace: Path) -> None:
+        """Test that end_line beyond file length is clamped to file end."""
+        test_file = temp_workspace / "clamp.txt"
+        test_file.write_text("line1\nline2\nline3\n")
+
+        resolver = ConflictResolver(workspace_root=temp_workspace)
+
+        change = Change(
+            path=str(test_file),
+            start_line=2,
+            end_line=100,  # Beyond file length, should clamp to 3
+            content="replacement",
+            metadata={},
+            fingerprint="fp_clamp",
+            file_type=FileType.PLAINTEXT,
+            change_type="modification",
+        )
+
+        result = resolver._apply_plaintext_change(change)
+        assert result is True
+
+        content = test_file.read_text()
+        # Line 1 preserved, lines 2-3 replaced
+        assert "line1" in content
+        assert "replacement" in content
+        assert "line2" not in content
+        assert "line3" not in content

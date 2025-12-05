@@ -193,6 +193,18 @@ class TestJsonHandler:
         )
         assert result is False
 
+    def test_apply_change_deletion_with_non_dict_json_returns_false(self, tmp_path: Path) -> None:
+        """Test JSON deletion fails when original is not a dict (e.g., list)."""
+        handler = JsonHandler(workspace_root=tmp_path)
+        target = tmp_path / "array.json"
+        target.write_text('["item1", "item2"]', encoding="utf-8")
+
+        # Attempt to delete from a list (should fail - deletion requires dicts)
+        result = handler.apply_change(
+            str(target), '{"key": "ignored"}', 1, 1, change_type="deletion"
+        )
+        assert result is False
+
 
 class TestYamlHandler:
     """Test the YAML handler."""
@@ -485,6 +497,16 @@ class TestYamlHandler:
         result = handler.apply_change(
             str(target), "key: new\n", 1, 1, change_type="invalid"  # type: ignore[arg-type]
         )
+        assert result is False
+
+    def test_apply_change_deletion_with_non_dict_yaml_returns_false(self, tmp_path: Path) -> None:
+        """Test YAML deletion fails when original is not a dict (e.g., list)."""
+        handler = YamlHandler(workspace_root=tmp_path)
+        target = tmp_path / "array.yaml"
+        target.write_text("- item1\n- item2\n", encoding="utf-8")
+
+        # Attempt to delete from a list (should fail - deletion requires dicts)
+        result = handler.apply_change(str(target), "key: ignored\n", 1, 2, change_type="deletion")
         assert result is False
 
 
@@ -810,6 +832,18 @@ class TestTomlHandler:
 
         result = handler.apply_change(
             str(target), 'key = "new"', 1, 1, change_type="invalid"  # type: ignore[arg-type]
+        )
+        assert result is False
+
+    def test_apply_change_addition_with_invalid_toml_returns_false(self, tmp_path: Path) -> None:
+        """Test TOML addition fails when content is not valid TOML syntax."""
+        handler = TomlHandler(workspace_root=tmp_path)
+        target = tmp_path / "config.toml"
+        target.write_text('[section]\nkey = "value"\n', encoding="utf-8")
+
+        # Attempt to add invalid TOML syntax (missing closing quote)
+        result = handler.apply_change(
+            str(target), 'new_key = "unclosed', 2, 2, change_type="addition"
         )
         assert result is False
 
