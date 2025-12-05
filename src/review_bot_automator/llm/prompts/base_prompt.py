@@ -8,6 +8,18 @@ from GitHub PR review comments. The prompt is designed for:
 - Producing structured JSON output that maps to ParsedChange objects
 - Providing clear examples and validation rules
 - Supporting context injection (file path, line numbers)
+
+Template Placeholders:
+    {comment_body}: Raw comment text to analyze
+    {file_path}: Target file path for the change
+    {start_line}: Start of the diff range (0 = unknown)
+    {end_line}: End of the diff range (0 = unknown)
+    {detected_sources}: Formatted string describing detected comment formats.
+        Populated by UniversalLLMParser._build_source_context() using
+        extract_comment_sources() from comment_sources module. Example values:
+        "✓ 1 AI Prompt block(s) detected - HIGHEST PRIORITY (confidence >= 0.95)",
+        "✓ 2 diff block(s) detected (with hunk headers)",
+        "No structured blocks detected. Relying on natural language parsing".
 """
 
 PARSE_COMMENT_PROMPT: str = """You are a code change extractor analyzing GitHub PR review \
@@ -43,6 +55,40 @@ CodeRabbit comments can contain changes in multiple formats:
    **Option 1:** Use async/await
    **Option 2:** Use callbacks
    **Option 3:** Use promises
+
+## Priority Data Sources
+
+CodeRabbit comments may contain multiple data formats. Use this priority order:
+
+1. **🤖 Prompt for AI Agents** (HIGHEST PRIORITY - confidence >= 0.95)
+   - Found in: `<details><summary>🤖 Prompt for AI Agents</summary>...</details>`
+   - Contains explicit, structured instructions for automated tools
+   - Extract: file path, line range, exact action to take
+   - These instructions are authoritative - follow them precisely
+   - Example: "In src/foo.py around line 50, rename function bar to baz"
+
+2. **Suggestion blocks** (` ```suggestion `) - confidence >= 0.92
+   - Explicit code replacement - use exactly as provided
+   - Cross-reference with AI Prompt for context if both exist
+
+3. **Diff blocks** (` ```diff `)
+   - With @@ hunk headers: confidence >= 0.90 (typically ~0.95)
+   - Without hunk headers: confidence 0.70-0.85 (less precise line numbers)
+   - When both diff AND AI Prompt exist, use AI Prompt for intent, diff for exact changes
+   - Cross-reference to validate line numbers match
+
+4. **Natural language** (LOWEST PRIORITY)
+   - Use only when no structured formats are present
+   - Lower confidence (< 0.75) for inferred changes
+
+**Conflict Resolution**: When AI Prompt contradicts diff/suggestion blocks:
+- Prioritize AI Prompt for understanding the INTENT of the change
+- Use diff/suggestion blocks for the EXACT code changes
+- Flag any line-number or intent discrepancies in the rationale field
+
+## Detected Sources in This Comment
+
+{detected_sources}
 
 ## Context Information
 

@@ -12,6 +12,13 @@ code changes from CodeRabbit review comments. The parser:
 - Supports cost budget enforcement
 
 The parser is provider-agnostic and works with any LLMProvider implementation.
+
+Public API:
+    UniversalLLMParser: Main parser class for extracting code changes
+    CONFIDENCE_AI_PROMPT: Threshold for AI prompt blocks (0.95)
+    CONFIDENCE_SUGGESTION: Threshold for suggestion blocks (0.92)
+    CONFIDENCE_DIFF_WITH_HUNK: Threshold for diff blocks with hunk headers (0.90)
+    CONFIDENCE_NATURAL_LANGUAGE_MAX: Upper bound for natural language inference (0.75)
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import re
 import threading
 
 from review_bot_automator.llm.base import LLMParser, ParsedChange
+from review_bot_automator.llm.comment_sources import CommentSources, extract_comment_sources
 from review_bot_automator.llm.cost_tracker import CostStatus, CostTracker
 from review_bot_automator.llm.exceptions import LLMCostExceededError, LLMSecretDetectedError
 from review_bot_automator.llm.prompts import PARSE_COMMENT_PROMPT
@@ -30,11 +38,29 @@ from review_bot_automator.security.secret_scanner import SecretScanner
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "CONFIDENCE_AI_PROMPT",
+    "CONFIDENCE_DIFF_WITH_HUNK",
+    "CONFIDENCE_NATURAL_LANGUAGE_MAX",
+    "CONFIDENCE_SUGGESTION",
+    "UniversalLLMParser",
+]
+
 # Pattern to match markdown JSON code fences
 _JSON_FENCE_PATTERN = re.compile(
     r"^```(?:json)?\s*\n(.*?)\n```\s*$",
     re.DOTALL,
 )
+
+# Maximum characters to include in AI prompt preview for LLM context
+_AI_PROMPT_PREVIEW_LENGTH = 200
+
+# Confidence thresholds for detected source types (used in prompt context messages)
+# These document the expected confidence levels for different source types
+CONFIDENCE_AI_PROMPT = 0.95  # Highest priority - explicit AI instructions
+CONFIDENCE_SUGGESTION = 0.92  # Explicit code replacement
+CONFIDENCE_DIFF_WITH_HUNK = 0.90  # Diff with @@ headers
+CONFIDENCE_NATURAL_LANGUAGE_MAX = 0.75  # Inferred from text (upper bound)
 
 
 def _strip_json_fences(text: str) -> str:
@@ -146,6 +172,66 @@ class UniversalLLMParser(LLMParser):
             "enabled" if scan_for_secrets else "disabled",
         )
 
+    def _build_source_context(self, sources: CommentSources) -> str:
+        """Build context string describing detected sources for LLM prompt.
+
+        This method formats information about detected structured blocks in
+        the comment to help the LLM prioritize extraction from authoritative
+        sources (like AI prompt blocks) over natural language inference.
+
+        Args:
+            sources: CommentSources from extract_comment_sources()
+
+        Returns:
+            Formatted string describing detected blocks for LLM context.
+            Returns a fallback message when no structured blocks are detected.
+
+        Example:
+            When AI prompt and diff blocks are detected::
+
+                ✓ 1 AI Prompt block(s) detected - HIGHEST PRIORITY (confidence >= 0.95)
+                  AI Instructions: In src/foo.py around line 50...
+                ✓ 2 diff block(s) detected (with hunk headers)
+
+            When no structured blocks are detected::
+
+                No structured blocks detected. Relying on natural language parsing
+                (lower confidence).
+        """
+        if not sources.has_any_blocks:
+            return (
+                "No structured blocks detected. "
+                "Relying on natural language parsing (lower confidence)."
+            )
+
+        parts: list[str] = []
+
+        if sources.ai_prompt_blocks:
+            count = len(sources.ai_prompt_blocks)
+            parts.append(
+                f"✓ {count} AI Prompt block(s) detected - "
+                f"HIGHEST PRIORITY (confidence >= {CONFIDENCE_AI_PROMPT})"
+            )
+            # Include first AI prompt content preview for context
+            first_prompt = sources.ai_prompt_blocks[0]
+            if first_prompt.content:
+                preview = first_prompt.content[:_AI_PROMPT_PREVIEW_LENGTH]
+                if len(first_prompt.content) > _AI_PROMPT_PREVIEW_LENGTH:
+                    preview += "..."
+                parts.append(f"  AI Instructions: {preview}")
+
+        if sources.suggestion_blocks:
+            count = len(sources.suggestion_blocks)
+            parts.append(f"✓ {count} suggestion block(s) detected")
+
+        if sources.diff_blocks:
+            count = len(sources.diff_blocks)
+            has_hunk = any(b.has_hunk_header for b in sources.diff_blocks)
+            hunk_note = " (with hunk headers)" if has_hunk else ""
+            parts.append(f"✓ {count} diff block(s) detected{hunk_note}")
+
+        return "\n".join(parts)
+
     def parse_comment(
         self,
         comment_body: str,
@@ -233,12 +319,26 @@ class UniversalLLMParser(LLMParser):
                 else (line_number if line_number is not None else 0)
             )
 
-            # Build prompt with context (now includes start_line and end_line)
+            # Detect structured blocks in comment (Issue #300)
+            sources = extract_comment_sources(comment_body)
+            detected_sources_text = self._build_source_context(sources)
+
+            # Log if AI prompt detected for debugging/monitoring
+            if sources.has_ai_prompt:
+                logger.info(
+                    "AI Prompt block detected in comment for %s:%s-%s",
+                    file_path or "unknown",
+                    effective_start,
+                    effective_end,
+                )
+
+            # Build prompt with context (now includes start_line, end_line, and detected_sources)
             prompt = PARSE_COMMENT_PROMPT.format(
                 comment_body=comment_body,
                 file_path=file_path or "unknown",
                 start_line=effective_start,
                 end_line=effective_end,
+                detected_sources=detected_sources_text,
             )
 
             if logger.isEnabledFor(logging.DEBUG):
