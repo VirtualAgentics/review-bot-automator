@@ -1331,6 +1331,64 @@ Some instruction.
         # Should have logged warning about invalid JSON
         assert any("invalid JSON" in record.message for record in caplog.records)
 
+    def test_fallback_skipped_when_budget_exceeded(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test that fallback is skipped when cost budget is exceeded.
+
+        Scenario:
+        - Initial parse returns low confidence
+        - Cost budget is exceeded after initial call
+        - Fallback should NOT trigger (budget check)
+        """
+        import logging
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        # Initial parse returns low confidence
+        mock_provider.generate.return_value = """[{
+            "file_path": "src/test.py",
+            "start_line": 50,
+            "end_line": 52,
+            "new_content": "# Low confidence",
+            "change_type": "modification",
+            "confidence": 0.3,
+            "rationale": "Unclear",
+            "risk_level": "low"
+        }]"""
+        mock_provider.get_total_cost.return_value = 0.0
+
+        cost_tracker = MagicMock(spec=CostTracker)
+        # Initial call allowed, but budget exceeded before fallback
+        cost_tracker.should_block_request.side_effect = [False, True]
+        cost_tracker.add_cost.return_value = CostStatus.OK
+
+        parser = UniversalLLMParser(
+            mock_provider, cost_tracker=cost_tracker, confidence_threshold=0.5
+        )
+
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+In src/test.py around line 50, rename function foo.
+
+</details>
+"""
+        with caplog.at_level(logging.INFO):
+            changes = parser.parse_comment(
+                comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+            )
+
+        # Should have made only ONE LLM call (fallback skipped due to budget)
+        assert mock_provider.generate.call_count == 1
+
+        # Should log that budget exceeded
+        assert any(
+            "Cost budget exceeded; skipping AI prompt fallback" in record.message
+            for record in caplog.records
+        )
+
+        # No changes above threshold
+        assert len(changes) == 0
+
     def test_fallback_tracks_cost(self) -> None:
         """Test that fallback LLM call cost is tracked."""
         mock_provider = MagicMock(spec=LLMProvider)

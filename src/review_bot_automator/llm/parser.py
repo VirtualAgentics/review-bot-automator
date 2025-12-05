@@ -503,92 +503,97 @@ class UniversalLLMParser(LLMParser):
                 )
                 self._ai_prompt_reparsed = True  # Prevent infinite loops
 
-                # Build enhanced prompt with AI prompt emphasized
-                ai_content = sources.ai_prompt_blocks[0].content
-                enhanced_prompt = self._build_enhanced_ai_prompt(
-                    comment_body=comment_body,
-                    ai_prompt_content=ai_content,
-                    file_path=file_path or "unknown",
-                    start_line=effective_start,
-                    end_line=effective_end,
-                    detected_sources_text=detected_sources_text,
-                )
-
-                # Track cost for fallback LLM call
-                fallback_previous_cost = (
-                    self.provider.get_total_cost() if self.cost_tracker else 0.0
-                )
-
-                # Generate with enhanced prompt
-                fallback_response = self.provider.generate(
-                    enhanced_prompt, max_tokens=self.max_tokens
-                )
-
-                # Track cost after fallback call
-                if self.cost_tracker:
-                    fallback_current_cost = self.provider.get_total_cost()
-                    fallback_request_cost = fallback_current_cost - fallback_previous_cost
-                    fallback_status = self.cost_tracker.add_cost(fallback_request_cost)
-
-                    # Log warning at threshold (same as initial call)
-                    if fallback_status == CostStatus.WARNING:
-                        warning_msg = self.cost_tracker.get_warning_message()
-                        if warning_msg:
-                            logger.warning(warning_msg)
-
-                logger.debug(
-                    "AI prompt fallback response length: %d characters",
-                    len(fallback_response),
-                )
-
-                # Parse fallback response (same JSON parsing logic)
-                fallback_json_text = _strip_json_fences(fallback_response)
-                try:
-                    fallback_changes_data = json.loads(fallback_json_text)
-                except json.JSONDecodeError as e:
-                    logger.warning(
-                        "AI prompt fallback returned invalid JSON: %s... "
-                        "(truncated, total %d chars). Error: %s",
-                        fallback_json_text[:200],
-                        len(fallback_json_text),
-                        e,
+                # Check budget before fallback LLM call (same as initial call)
+                if self.cost_tracker and self.cost_tracker.should_block_request():
+                    logger.info("Cost budget exceeded; skipping AI prompt fallback LLM call")
+                    # Skip fallback, return with current (empty) parsed_changes
+                else:
+                    # Build enhanced prompt with AI prompt emphasized
+                    ai_content = sources.ai_prompt_blocks[0].content
+                    enhanced_prompt = self._build_enhanced_ai_prompt(
+                        comment_body=comment_body,
+                        ai_prompt_content=ai_content,
+                        file_path=file_path or "unknown",
+                        start_line=effective_start,
+                        end_line=effective_end,
+                        detected_sources_text=detected_sources_text,
                     )
-                    # Fall through to return empty parsed_changes
-                    fallback_changes_data = []
 
-                if isinstance(fallback_changes_data, list):
-                    # Track count before adding fallback changes
-                    initial_count = len(parsed_changes)
+                    # Track cost for fallback LLM call
+                    fallback_previous_cost = (
+                        self.provider.get_total_cost() if self.cost_tracker else 0.0
+                    )
 
-                    for idx, change_dict in enumerate(fallback_changes_data):
-                        try:
-                            change = ParsedChange(**change_dict)
-                            if change.confidence >= self.confidence_threshold:
-                                parsed_changes.append(change)
-                                logger.debug(
-                                    "Fallback parsed change %d: %s:%d-%d "
-                                    "(confidence=%.2f, risk=%s)",
-                                    idx + 1,
-                                    change.file_path,
-                                    change.start_line,
-                                    change.end_line,
-                                    change.confidence,
-                                    change.risk_level,
+                    # Generate with enhanced prompt
+                    fallback_response = self.provider.generate(
+                        enhanced_prompt, max_tokens=self.max_tokens
+                    )
+
+                    # Track cost after fallback call
+                    if self.cost_tracker:
+                        fallback_current_cost = self.provider.get_total_cost()
+                        fallback_request_cost = fallback_current_cost - fallback_previous_cost
+                        fallback_status = self.cost_tracker.add_cost(fallback_request_cost)
+
+                        # Log warning at threshold (same as initial call)
+                        if fallback_status == CostStatus.WARNING:
+                            warning_msg = self.cost_tracker.get_warning_message()
+                            if warning_msg:
+                                logger.warning(warning_msg)
+
+                    logger.debug(
+                        "AI prompt fallback response length: %d characters",
+                        len(fallback_response),
+                    )
+
+                    # Parse fallback response (same JSON parsing logic)
+                    fallback_json_text = _strip_json_fences(fallback_response)
+                    try:
+                        fallback_changes_data = json.loads(fallback_json_text)
+                    except json.JSONDecodeError as e:
+                        logger.warning(
+                            "AI prompt fallback returned invalid JSON: %s... "
+                            "(truncated, total %d chars). Error: %s",
+                            fallback_json_text[:200],
+                            len(fallback_json_text),
+                            e,
+                        )
+                        # Fall through to return empty parsed_changes
+                        fallback_changes_data = []
+
+                    if isinstance(fallback_changes_data, list):
+                        # Track count before adding fallback changes
+                        initial_count = len(parsed_changes)
+
+                        for idx, change_dict in enumerate(fallback_changes_data):
+                            try:
+                                change = ParsedChange(**change_dict)
+                                if change.confidence >= self.confidence_threshold:
+                                    parsed_changes.append(change)
+                                    logger.debug(
+                                        "Fallback parsed change %d: %s:%d-%d "
+                                        "(confidence=%.2f, risk=%s)",
+                                        idx + 1,
+                                        change.file_path,
+                                        change.start_line,
+                                        change.end_line,
+                                        change.confidence,
+                                        change.risk_level,
+                                    )
+                            except (TypeError, ValueError) as e:
+                                logger.warning(
+                                    "Invalid fallback change format at index %d: %s. " "Error: %s",
+                                    idx,
+                                    change_dict,
+                                    e,
                                 )
-                        except (TypeError, ValueError) as e:
-                            logger.warning(
-                                "Invalid fallback change format at index %d: %s. Error: %s",
-                                idx,
-                                change_dict,
-                                e,
-                            )
-                            continue
+                                continue
 
-                    added_count = len(parsed_changes) - initial_count
-                    logger.info(
-                        "AI prompt fallback parsed %d additional changes",
-                        added_count,
-                    )
+                        added_count = len(parsed_changes) - initial_count
+                        logger.info(
+                            "AI prompt fallback parsed %d additional changes",
+                            added_count,
+                        )
 
             # Track successful LLM parse (thread-safe)
             with self._stats_lock:
