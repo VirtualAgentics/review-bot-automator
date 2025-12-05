@@ -67,8 +67,15 @@ class YamlHandler(BaseHandler):
         """
         return file_path.lower().endswith((".yaml", ".yml"))
 
-    def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
-        """Apply a suggested YAML fragment into a file by merging with current content.
+    def apply_change(
+        self,
+        path: str,
+        content: str,
+        start_line: int,
+        end_line: int,
+        change_type: str = "modification",
+    ) -> bool:
+        """Apply a YAML change to a file based on change_type.
 
         Parses the target file and the provided YAML suggestion, performs a high-level merge
         (preserving quotes and comments where possible) guided by the given start and end line
@@ -80,6 +87,10 @@ class YamlHandler(BaseHandler):
             content (str): YAML text containing the suggestion to apply.
             start_line (int): Starting line number in the original file used to guide merging.
             end_line (int): Ending line number in the original file used to guide merging.
+            change_type (str): Type of change to apply. One of:
+                - "modification": Merge suggestion into original YAML (default).
+                - "addition": Same as modification for YAML (keys are added/merged).
+                - "deletion": Remove keys specified in content from the YAML file.
 
         Returns:
             bool: `True` if the merged YAML was written successfully, `False` otherwise.
@@ -168,8 +179,36 @@ class YamlHandler(BaseHandler):
             self.logger.error(f"Error parsing YAML suggestion: {e}")
             return False
 
-        # Apply suggestion using smart merge
-        merged_data = self._smart_merge_yaml(original_data, suggestion_data, start_line, end_line)
+        # Validate change_type
+        valid_change_types = {"addition", "modification", "deletion"}
+        if change_type not in valid_change_types:
+            self.logger.error(
+                f"Invalid change_type {change_type!r}; must be one of {valid_change_types}"
+            )
+            return False
+
+        # Apply change based on change_type.
+        # Note: YAML uses key-based merging (unlike line-based formats like TOML/plaintext).
+        # For YAML, "addition" and "modification" both result in key merging (suggestion keys
+        # overwrite/add to original). Only "deletion" is distinct (removes keys from original).
+        merged_data: YAMLValue
+        if change_type == "deletion":
+            # Deletion: remove keys specified in content from original
+            # Preserve CommentedMap semantics (comments/ordering) by copying and deleting keys
+            if isinstance(suggestion_data, dict) and isinstance(original_data, dict):
+                # Copy original to preserve CommentedMap type and metadata
+                merged_data = original_data.copy()
+                for key in suggestion_data:
+                    if key in merged_data:
+                        del merged_data[key]
+            else:
+                self.logger.error("YAML deletion requires both original and content to be dicts")
+                return False
+        else:
+            # modification and addition: merge suggestion into original
+            merged_data = self._smart_merge_yaml(
+                original_data, suggestion_data, start_line, end_line
+            )
 
         # Write atomically with comment preservation
         try:

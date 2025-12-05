@@ -2,6 +2,8 @@
 
 from dataclasses import is_dataclass
 
+import pytest
+
 from review_bot_automator.core.models import (
     Change,
     Conflict,
@@ -222,8 +224,6 @@ def test_change_metadata_with_llm_fields() -> None:
 
 def test_change_validation_invalid_confidence_too_low() -> None:
     """Test Change validation rejects llm_confidence < 0.0."""
-    import pytest
-
     with pytest.raises(ValueError, match="llm_confidence must be between 0.0 and 1.0"):
         Change(
             path="test.py",
@@ -239,8 +239,6 @@ def test_change_validation_invalid_confidence_too_low() -> None:
 
 def test_change_validation_invalid_confidence_too_high() -> None:
     """Test Change validation rejects llm_confidence > 1.0."""
-    import pytest
-
     with pytest.raises(ValueError, match="llm_confidence must be between 0.0 and 1.0"):
         Change(
             path="test.py",
@@ -256,8 +254,6 @@ def test_change_validation_invalid_confidence_too_high() -> None:
 
 def test_change_validation_empty_provider() -> None:
     """Test Change validation rejects empty string llm_provider."""
-    import pytest
-
     with pytest.raises(ValueError, match="llm_provider must not be empty string"):
         Change(
             path="test.py",
@@ -273,8 +269,6 @@ def test_change_validation_empty_provider() -> None:
 
 def test_change_validation_invalid_risk_level() -> None:
     """Test Change validation rejects invalid risk_level values."""
-    import pytest
-
     with pytest.raises(ValueError, match="risk_level must be one of"):
         Change(
             path="test.py",
@@ -349,3 +343,48 @@ def test_change_validation_none_values_allowed() -> None:
     assert change.llm_confidence is None
     assert change.llm_provider is None
     assert change.risk_level is None
+
+
+def test_change_type_default_is_modification() -> None:
+    """Test Change defaults to change_type='modification' (Issue #312)."""
+    change = Change(
+        path="test.py",
+        start_line=1,
+        end_line=1,
+        content="# test",
+        metadata={},
+        fingerprint="fp1",
+        file_type=FileType.PYTHON,
+    )
+    assert change.change_type == "modification"
+
+
+@pytest.mark.parametrize("change_type", ["addition", "modification", "deletion"])
+def test_change_type_valid_values(change_type: str) -> None:
+    """Test Change accepts all valid change_type values (Issue #312)."""
+    change = Change(
+        path="test.py",
+        start_line=1,
+        end_line=1,
+        content="# test",
+        metadata={},
+        fingerprint=f"fp_{change_type}",
+        file_type=FileType.PYTHON,
+        change_type=change_type,  # type: ignore[arg-type]
+    )
+    assert change.change_type == change_type
+
+
+def test_change_type_invalid_value_raises() -> None:
+    """Test Change validation rejects invalid change_type values (Issue #312)."""
+    with pytest.raises(ValueError, match="change_type must be one of"):
+        Change(
+            path="test.py",
+            start_line=1,
+            end_line=1,
+            content="# test",
+            metadata={},
+            fingerprint="fp1",
+            file_type=FileType.PYTHON,
+            change_type="replace",  # type: ignore[arg-type]  # Invalid - only addition/modification/deletion allowed
+        )

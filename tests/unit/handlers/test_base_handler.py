@@ -15,7 +15,14 @@ class ConcreteHandler(BaseHandler):
         """Handle all files for testing."""
         return True
 
-    def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
+    def apply_change(
+        self,
+        path: str,
+        content: str,
+        start_line: int,
+        end_line: int,
+        change_type: str = "modification",
+    ) -> bool:
         """Stub implementation."""
         return True
 

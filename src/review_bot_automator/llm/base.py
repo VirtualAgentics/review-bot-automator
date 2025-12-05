@@ -12,6 +12,7 @@ Phase 1: Provider and parser implementations build on these foundations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +52,7 @@ class ParsedChange:
     start_line: int
     end_line: int
     new_content: str
-    change_type: str
+    change_type: Literal["addition", "modification", "deletion"]
     confidence: float
     rationale: str
     risk_level: str = "low"

@@ -208,7 +208,7 @@ class TestParsedChangeValidation:
                 start_line=1,
                 end_line=5,
                 new_content="code",
-                change_type="invalid_type",  # Invalid
+                change_type="invalid_type",  # type: ignore[arg-type]  # Invalid
                 confidence=0.9,
                 rationale="Test",
             )

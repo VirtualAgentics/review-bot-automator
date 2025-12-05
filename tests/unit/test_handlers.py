@@ -646,7 +646,14 @@ def test_handler(tmp_path: Path) -> BaseHandler:
         def can_handle(self, file_path: str) -> bool:
             return True
 
-        def apply_change(self, path: str, content: str, start_line: int, end_line: int) -> bool:
+        def apply_change(
+            self,
+            path: str,
+            content: str,
+            start_line: int,
+            end_line: int,
+            change_type: str = "modification",
+        ) -> bool:
             return True
 
         def validate_change(
