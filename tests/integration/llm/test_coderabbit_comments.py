@@ -183,7 +183,7 @@ class TestRealCodeRabbitComments:
 
         Verifies:
         - AI prompt block is detected
-        - Diff block with hunk header is detected
+        - Diff block is detected even without @@ hunk header
         - Content extraction is accurate
         """
         sources = extract_comment_sources(PR_286_LINE_ORDERING_COMMENT)
