@@ -233,7 +233,7 @@ jobs:
       # Uses custom configuration for enhanced security coverage.
       # The config file specifies both security-extended and security-and-quality query suites.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@fe4161a26a8629af62121b670040955b330f9af2 # v4.31.6
+        uses: github/codeql-action/init@cf1bb45a277cb3c205638b2cd5c984db1c46a412 # v4.31.7
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
@@ -253,7 +253,7 @@ jobs:
       # Results can be viewed in the Security > Code scanning alerts tab
       - name: Perform CodeQL Analysis
         id: analyze
-        uses: github/codeql-action/analyze@fe4161a26a8629af62121b670040955b330f9af2 # v4.31.6
+        uses: github/codeql-action/analyze@cf1bb45a277cb3c205638b2cd5c984db1c46a412 # v4.31.7
         with:
           category: "/language:${{matrix.language}}"  # Categorize results by language
           upload: true  # Upload SARIF results to GitHub Security tab
@@ -325,7 +325,7 @@ jobs:
       # Upload Trivy results to GitHub Security tab
       # Always runs even if scan fails, to ensure visibility
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@fe4161a26a8629af62121b670040955b330f9af2  # v4.31.6
+        uses: github/codeql-action/upload-sarif@cf1bb45a277cb3c205638b2cd5c984db1c46a412  # v4.31.7
         if: always()  # Upload even if scan found vulnerabilities
         with:
           sarif_file: 'trivy-results.sarif'
@@ -498,7 +498,7 @@ jobs:
       # Upload Scorecard results to GitHub Security tab
       # Always uploads to track score trends over time
       - name: Upload Scorecard results to GitHub Security
-        uses: github/codeql-action/upload-sarif@fe4161a26a8629af62121b670040955b330f9af2  # v4.31.6
+        uses: github/codeql-action/upload-sarif@cf1bb45a277cb3c205638b2cd5c984db1c46a412  # v4.31.7
         if: always()  # Upload even if score is below threshold
         with:
           sarif_file: scorecard-results.sarif
