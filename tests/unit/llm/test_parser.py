@@ -1007,3 +1007,383 @@ In src/test.py around line 50, rename function foo to renamed_function.
 
         # Check that AI prompt detection was logged
         assert any("AI Prompt block detected" in record.message for record in caplog.records)
+
+
+class TestAIPromptFallbackReparse:
+    """Test AI prompt fallback re-parse mechanism (Issue #301).
+
+    When the initial parse returns no changes above threshold but an AI prompt
+    block is detected, the parser should automatically re-parse with an enhanced
+    prompt emphasizing the AI prompt content.
+    """
+
+    def test_fallback_triggers_on_low_confidence_with_ai_prompt(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that fallback activates when initial parse has low confidence.
+
+        Scenario:
+        - Initial LLM response returns changes below threshold
+        - Comment contains AI prompt block
+        - Fallback should trigger with enhanced prompt
+        """
+        import logging
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        # First call: returns low confidence change (below 0.5 threshold)
+        # Second call (fallback): returns high confidence change
+        mock_provider.generate.side_effect = [
+            # First parse - low confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "# Low confidence",
+                "change_type": "modification",
+                "confidence": 0.3,
+                "rationale": "Unclear",
+                "risk_level": "low"
+            }]""",
+            # Fallback parse - high confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "renamed_function()",
+                "change_type": "modification",
+                "confidence": 0.95,
+                "rationale": "AI prompt instructed rename",
+                "risk_level": "low"
+            }]""",
+        ]
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, confidence_threshold=0.5)
+
+        # Comment with AI prompt block
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+In src/test.py around line 50, rename function foo to renamed_function.
+
+</details>
+"""
+        with caplog.at_level(logging.INFO):
+            changes = parser.parse_comment(
+                comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+            )
+
+        # Fallback should have been triggered
+        assert any(
+            "attempting enhanced AI prompt fallback" in record.message for record in caplog.records
+        )
+
+        # Should have made two LLM calls
+        assert mock_provider.generate.call_count == 2
+
+        # Second call should include the fallback preamble
+        second_call_prompt = mock_provider.generate.call_args_list[1][0][0]
+        assert "FALLBACK MODE" in second_call_prompt
+        assert "PRIORITY EXTRACTION SOURCE" in second_call_prompt
+
+        # Should have returned the high-confidence change from fallback
+        assert len(changes) == 1
+        assert changes[0].confidence == 0.95
+        assert "renamed_function" in changes[0].new_content
+
+    def test_fallback_limited_to_single_attempt(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test that re-parsing is limited to single attempt to prevent loops.
+
+        Scenario:
+        - Initial parse returns low confidence
+        - Fallback parse also returns low confidence
+        - Should NOT trigger another fallback (only one re-parse allowed)
+        """
+        import logging
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        # Both calls return low confidence - should NOT trigger third call
+        # Use side_effect with list to explicitly simulate two separate LLM calls
+        mock_provider.generate.side_effect = [
+            # First parse - low confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "# Low confidence initial",
+                "change_type": "modification",
+                "confidence": 0.3,
+                "rationale": "Unclear from initial parse",
+                "risk_level": "low"
+            }]""",
+            # Fallback parse - also low confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "# Low confidence fallback",
+                "change_type": "modification",
+                "confidence": 0.3,
+                "rationale": "Still unclear from fallback",
+                "risk_level": "low"
+            }]""",
+        ]
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, confidence_threshold=0.5)
+
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+In src/test.py around line 50, rename function foo.
+
+</details>
+"""
+        with caplog.at_level(logging.INFO):
+            changes = parser.parse_comment(
+                comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+            )
+
+        # Should have made exactly two LLM calls (initial + one fallback)
+        assert mock_provider.generate.call_count == 2
+
+        # No changes above threshold (both attempts returned low confidence)
+        assert len(changes) == 0
+
+    def test_fallback_skipped_when_no_ai_prompt(self) -> None:
+        """Test that fallback is NOT triggered when no AI prompt block exists.
+
+        Scenario:
+        - Initial parse returns low confidence (or no changes above threshold)
+        - Comment does NOT contain AI prompt block
+        - Fallback should NOT trigger
+        """
+        mock_provider = MagicMock(spec=LLMProvider)
+        # Returns low confidence - normally would trigger fallback
+        mock_provider.generate.return_value = """[{
+            "file_path": "src/test.py",
+            "start_line": 50,
+            "end_line": 52,
+            "new_content": "# Low confidence",
+            "change_type": "modification",
+            "confidence": 0.3,
+            "rationale": "Unclear",
+            "risk_level": "low"
+        }]"""
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, confidence_threshold=0.5)
+
+        # Comment WITHOUT AI prompt block
+        comment_without_ai_prompt = "Maybe fix this function? Not sure."
+
+        changes = parser.parse_comment(
+            comment_without_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+        )
+
+        # Should have made only ONE LLM call (no fallback)
+        assert mock_provider.generate.call_count == 1
+
+        # No changes above threshold
+        assert len(changes) == 0
+
+    def test_fallback_skipped_when_changes_accepted(self) -> None:
+        """Test that fallback is NOT triggered when changes are already accepted.
+
+        Scenario:
+        - Initial parse returns changes above threshold
+        - Even if AI prompt block exists, fallback should NOT trigger
+        """
+        mock_provider = MagicMock(spec=LLMProvider)
+        # Returns high confidence change
+        mock_provider.generate.return_value = """[{
+            "file_path": "src/test.py",
+            "start_line": 50,
+            "end_line": 52,
+            "new_content": "# High confidence",
+            "change_type": "modification",
+            "confidence": 0.95,
+            "rationale": "Clear instruction",
+            "risk_level": "low"
+        }]"""
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, confidence_threshold=0.5)
+
+        # Comment with AI prompt block
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+In src/test.py around line 50, do something.
+
+</details>
+"""
+        changes = parser.parse_comment(
+            comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+        )
+
+        # Should have made only ONE LLM call (no fallback needed)
+        assert mock_provider.generate.call_count == 1
+
+        # Change was accepted
+        assert len(changes) == 1
+        assert changes[0].confidence == 0.95
+
+    def test_fallback_resets_for_each_comment(self) -> None:
+        """Test that fallback flag resets for each new parse_comment call.
+
+        Scenario:
+        - First comment: triggers fallback
+        - Second comment: should also be able to trigger fallback (not blocked)
+        """
+        mock_provider = MagicMock(spec=LLMProvider)
+        # All calls return low confidence to trigger fallback
+        mock_provider.generate.return_value = """[{
+            "file_path": "src/test.py",
+            "start_line": 50,
+            "end_line": 52,
+            "new_content": "# Low confidence",
+            "change_type": "modification",
+            "confidence": 0.3,
+            "rationale": "Unclear",
+            "risk_level": "low"
+        }]"""
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, confidence_threshold=0.5)
+
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+Some AI instruction.
+
+</details>
+"""
+        # First comment
+        parser.parse_comment(
+            comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+        )
+
+        # Second comment
+        parser.parse_comment(
+            comment_with_ai_prompt, file_path="src/other.py", start_line=10, end_line=15
+        )
+
+        # Each comment should trigger initial + fallback = 2 calls
+        # Total: 2 comments * 2 calls = 4 calls
+        assert mock_provider.generate.call_count == 4
+
+    def test_fallback_handles_invalid_json_gracefully(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that fallback handles invalid JSON response gracefully.
+
+        Scenario:
+        - Initial parse returns low confidence
+        - Fallback parse returns invalid JSON
+        - Should not crash, return empty list
+        """
+        import logging
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.side_effect = [
+            # First parse - low confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "# Low confidence",
+                "change_type": "modification",
+                "confidence": 0.3,
+                "rationale": "Unclear",
+                "risk_level": "low"
+            }]""",
+            # Fallback parse - invalid JSON
+            "not valid json {{",
+        ]
+        mock_provider.get_total_cost.return_value = 0.0
+
+        parser = UniversalLLMParser(mock_provider, confidence_threshold=0.5)
+
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+Some instruction.
+
+</details>
+"""
+        with caplog.at_level(logging.WARNING):
+            changes = parser.parse_comment(
+                comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+            )
+
+        # Should have made two calls
+        assert mock_provider.generate.call_count == 2
+
+        # Should return empty list (no valid changes)
+        assert len(changes) == 0
+
+        # Should have logged warning about invalid JSON
+        assert any("invalid JSON" in record.message for record in caplog.records)
+
+    def test_fallback_tracks_cost(self) -> None:
+        """Test that fallback LLM call cost is tracked."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate.side_effect = [
+            # First parse - low confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "# Low confidence",
+                "change_type": "modification",
+                "confidence": 0.3,
+                "rationale": "Unclear",
+                "risk_level": "low"
+            }]""",
+            # Fallback parse - high confidence
+            """[{
+                "file_path": "src/test.py",
+                "start_line": 50,
+                "end_line": 52,
+                "new_content": "renamed()",
+                "change_type": "modification",
+                "confidence": 0.95,
+                "rationale": "Renamed",
+                "risk_level": "low"
+            }]""",
+        ]
+        # Costs: initial 0 -> 0.01, fallback 0.01 -> 0.02
+        mock_provider.get_total_cost.side_effect = [0.0, 0.01, 0.01, 0.02]
+
+        cost_tracker = MagicMock(spec=CostTracker)
+        cost_tracker.should_block_request.return_value = False
+        cost_tracker.add_cost.return_value = CostStatus.OK
+
+        parser = UniversalLLMParser(mock_provider, cost_tracker=cost_tracker)
+
+        comment_with_ai_prompt = """
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+Rename the function.
+
+</details>
+"""
+        parser.parse_comment(
+            comment_with_ai_prompt, file_path="src/test.py", start_line=50, end_line=52
+        )
+
+        # Cost tracker should have been called twice (initial + fallback)
+        assert cost_tracker.add_cost.call_count == 2
+
+        # First call: initial parse cost (0.01 - 0.0 = 0.01)
+        assert cost_tracker.add_cost.call_args_list[0][0][0] == 0.01
+
+        # Second call: fallback parse cost (0.02 - 0.01 = 0.01)
+        assert cost_tracker.add_cost.call_args_list[1][0][0] == 0.01

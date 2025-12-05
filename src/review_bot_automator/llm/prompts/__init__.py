@@ -12,7 +12,10 @@ The prompts are designed to work with structured output modes (JSON) to ensure
 reliable parsing and validation of LLM responses.
 """
 
-from review_bot_automator.llm.prompts.base_prompt import PARSE_COMMENT_PROMPT
+from review_bot_automator.llm.prompts.base_prompt import (
+    AI_PROMPT_FALLBACK_PREAMBLE,
+    PARSE_COMMENT_PROMPT,
+)
 from review_bot_automator.llm.prompts.examples import (
     EXAMPLE_DIFF_BLOCKS,
     EXAMPLE_MULTI_OPTION,
@@ -21,6 +24,7 @@ from review_bot_automator.llm.prompts.examples import (
 )
 
 __all__ = [
+    "AI_PROMPT_FALLBACK_PREAMBLE",
     "EXAMPLE_DIFF_BLOCKS",
     "EXAMPLE_MULTI_OPTION",
     "EXAMPLE_NATURAL_LANGUAGE",

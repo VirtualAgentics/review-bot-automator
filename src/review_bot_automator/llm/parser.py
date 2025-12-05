@@ -32,7 +32,10 @@ from review_bot_automator.llm.base import LLMParser, ParsedChange
 from review_bot_automator.llm.comment_sources import CommentSources, extract_comment_sources
 from review_bot_automator.llm.cost_tracker import CostStatus, CostTracker
 from review_bot_automator.llm.exceptions import LLMCostExceededError, LLMSecretDetectedError
-from review_bot_automator.llm.prompts import PARSE_COMMENT_PROMPT
+from review_bot_automator.llm.prompts import (
+    AI_PROMPT_FALLBACK_PREAMBLE,
+    PARSE_COMMENT_PROMPT,
+)
 from review_bot_automator.llm.providers.base import LLMProvider
 from review_bot_automator.security.secret_scanner import SecretScanner
 
@@ -162,6 +165,10 @@ class UniversalLLMParser(LLMParser):
         self._llm_success_count = 0
         self._stats_lock = threading.Lock()
 
+        # AI prompt fallback re-parse tracking (Issue #301)
+        # Used to prevent infinite loops - only one re-parse attempt per comment
+        self._ai_prompt_reparsed: bool = False
+
         logger.info(
             "Initialized UniversalLLMParser: fallback=%s, threshold=%s, max_tokens=%s, "
             "cost_tracker=%s, secret_scan=%s",
@@ -232,6 +239,49 @@ class UniversalLLMParser(LLMParser):
 
         return "\n".join(parts)
 
+    def _build_enhanced_ai_prompt(
+        self,
+        comment_body: str,
+        ai_prompt_content: str,
+        file_path: str,
+        start_line: int,
+        end_line: int,
+        detected_sources_text: str,
+    ) -> str:
+        """Build enhanced prompt with AI prompt block emphasized for fallback.
+
+        This method creates a modified version of the standard parsing prompt
+        that includes a fallback preamble emphasizing the AI prompt content.
+        Used when the initial parse returned no changes above threshold but
+        an AI Prompt block was detected (Issue #301).
+
+        Args:
+            comment_body: Original raw comment text
+            ai_prompt_content: Extracted content from the AI prompt block
+            file_path: Target file path for the change
+            start_line: Start of the diff range (0 = unknown)
+            end_line: End of the diff range (0 = unknown)
+            detected_sources_text: Pre-built source context string
+
+        Returns:
+            Enhanced prompt with fallback preamble prepended to guide
+            the LLM to extract from the AI prompt block with high confidence.
+        """
+        # Build the fallback preamble with AI prompt content
+        preamble = AI_PROMPT_FALLBACK_PREAMBLE.format(ai_prompt_content=ai_prompt_content)
+
+        # Build the standard prompt
+        standard_prompt = PARSE_COMMENT_PROMPT.format(
+            comment_body=comment_body,
+            file_path=file_path,
+            start_line=start_line,
+            end_line=end_line,
+            detected_sources=detected_sources_text,
+        )
+
+        # Prepend the fallback preamble
+        return preamble + standard_prompt
+
     def parse_comment(
         self,
         comment_body: str,
@@ -279,6 +329,9 @@ class UniversalLLMParser(LLMParser):
         """
         if not comment_body:
             raise ValueError("comment_body cannot be None or empty")
+
+        # Reset AI prompt fallback flag for each new comment (Issue #301)
+        self._ai_prompt_reparsed = False
 
         # Scan for secrets BEFORE sending to external LLM API
         if self.scan_for_secrets:
@@ -435,6 +488,107 @@ class UniversalLLMParser(LLMParser):
                 f"LLM parsed {len(parsed_changes)}/{len(changes_data)} changes "
                 f"(threshold={self.confidence_threshold})"
             )
+
+            # Issue #301: Automatic AI prompt fallback re-parse
+            # If no changes were accepted AND an AI prompt block exists AND
+            # we haven't already tried the fallback, attempt re-parse with
+            # enhanced prompt emphasizing the AI prompt content.
+            if not parsed_changes and sources.has_ai_prompt and not self._ai_prompt_reparsed:
+                logger.info(
+                    "No changes above threshold; attempting enhanced AI prompt "
+                    "fallback for %s:%s-%s",
+                    file_path or "unknown",
+                    effective_start,
+                    effective_end,
+                )
+                self._ai_prompt_reparsed = True  # Prevent infinite loops
+
+                # Build enhanced prompt with AI prompt emphasized
+                ai_content = sources.ai_prompt_blocks[0].content
+                enhanced_prompt = self._build_enhanced_ai_prompt(
+                    comment_body=comment_body,
+                    ai_prompt_content=ai_content,
+                    file_path=file_path or "unknown",
+                    start_line=effective_start,
+                    end_line=effective_end,
+                    detected_sources_text=detected_sources_text,
+                )
+
+                # Track cost for fallback LLM call
+                fallback_previous_cost = (
+                    self.provider.get_total_cost() if self.cost_tracker else 0.0
+                )
+
+                # Generate with enhanced prompt
+                fallback_response = self.provider.generate(
+                    enhanced_prompt, max_tokens=self.max_tokens
+                )
+
+                # Track cost after fallback call
+                if self.cost_tracker:
+                    fallback_current_cost = self.provider.get_total_cost()
+                    fallback_request_cost = fallback_current_cost - fallback_previous_cost
+                    fallback_status = self.cost_tracker.add_cost(fallback_request_cost)
+
+                    # Log warning at threshold (same as initial call)
+                    if fallback_status == CostStatus.WARNING:
+                        warning_msg = self.cost_tracker.get_warning_message()
+                        if warning_msg:
+                            logger.warning(warning_msg)
+
+                logger.debug(
+                    "AI prompt fallback response length: %d characters",
+                    len(fallback_response),
+                )
+
+                # Parse fallback response (same JSON parsing logic)
+                fallback_json_text = _strip_json_fences(fallback_response)
+                try:
+                    fallback_changes_data = json.loads(fallback_json_text)
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        "AI prompt fallback returned invalid JSON: %s... "
+                        "(truncated, total %d chars). Error: %s",
+                        fallback_json_text[:200],
+                        len(fallback_json_text),
+                        e,
+                    )
+                    # Fall through to return empty parsed_changes
+                    fallback_changes_data = []
+
+                if isinstance(fallback_changes_data, list):
+                    # Track count before adding fallback changes
+                    initial_count = len(parsed_changes)
+
+                    for idx, change_dict in enumerate(fallback_changes_data):
+                        try:
+                            change = ParsedChange(**change_dict)
+                            if change.confidence >= self.confidence_threshold:
+                                parsed_changes.append(change)
+                                logger.debug(
+                                    "Fallback parsed change %d: %s:%d-%d "
+                                    "(confidence=%.2f, risk=%s)",
+                                    idx + 1,
+                                    change.file_path,
+                                    change.start_line,
+                                    change.end_line,
+                                    change.confidence,
+                                    change.risk_level,
+                                )
+                        except (TypeError, ValueError) as e:
+                            logger.warning(
+                                "Invalid fallback change format at index %d: %s. Error: %s",
+                                idx,
+                                change_dict,
+                                e,
+                            )
+                            continue
+
+                    added_count = len(parsed_changes) - initial_count
+                    logger.info(
+                        "AI prompt fallback parsed %d additional changes",
+                        added_count,
+                    )
 
             # Track successful LLM parse (thread-safe)
             with self._stats_lock:
