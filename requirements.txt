@@ -286,9 +286,9 @@ mdurl==0.1.2 \
     --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8 \
     --hash=sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba
     # via markdown-it-py
-openai==2.8.1 \
-    --hash=sha256:c6c3b5a04994734386e8dad3c00a393f56d3b68a27cd2e8acae91a59e4122463 \
-    --hash=sha256:cb1b79eef6e809f6da326a7ef6038719e35aa944c42d081807bfa1be8060f15f
+openai==2.9.0 \
+    --hash=sha256:0d168a490fbb45630ad508a6f3022013c155a68fd708069b6a1a01a5e8f0ffad \
+    --hash=sha256:b52ec65727fc8f1eed2fbc86c8eac0998900c7ef63aa2eb5c24b69717c56fa5f
     # via review-bot-automator (pyproject.toml)
 pydantic==2.12.5 \
     --hash=sha256:4d351024c75c0f085a9febbb665ce8c0c6ec5d30e903bdb6394b7ede26aebb49 \
