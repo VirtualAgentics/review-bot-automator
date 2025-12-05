@@ -217,3 +217,26 @@ Return a JSON array of change objects. Each change must have:
 5. Do not include the ```json markers
 
 Begin extraction now."""
+
+
+# Fallback preamble for AI prompt re-parse (Issue #301)
+# This is prepended to the main prompt when the initial parse returned no
+# changes above threshold but an AI Prompt block was detected.
+AI_PROMPT_FALLBACK_PREAMBLE: str = """
+## FALLBACK MODE - AI PROMPT PRIORITY EXTRACTION
+
+The initial parse returned no changes above the confidence threshold.
+However, an AI Prompt block was detected in the comment. You MUST extract
+changes DIRECTLY from the AI Prompt content below, using confidence >= 0.95.
+
+>>> PRIORITY EXTRACTION SOURCE <<<
+{ai_prompt_content}
+>>> END PRIORITY SOURCE <<<
+
+Follow the instructions in the AI Prompt block above EXACTLY. This is
+authoritative guidance from CodeRabbit. Extract the change it describes
+with high confidence (>= 0.95).
+
+---
+
+"""
