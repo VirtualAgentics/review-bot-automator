@@ -75,7 +75,10 @@ class BaseHandler(ABC):
 
         Raises:
             IOError: If the file cannot be read or written.
-            ValueError: If the provided line numbers are invalid or change_type is unknown.
+            ValueError: If the provided line numbers are invalid.
+
+        Note:
+            Invalid change_type values are logged and return False rather than raising.
         """
 
     @abstractmethod

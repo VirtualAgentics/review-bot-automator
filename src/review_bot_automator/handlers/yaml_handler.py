@@ -15,7 +15,7 @@ import stat
 import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, Literal, TypeAlias
 
 from review_bot_automator.core.models import Change, Conflict
 from review_bot_automator.handlers.base import BaseHandler
@@ -73,7 +73,7 @@ class YamlHandler(BaseHandler):
         content: str,
         start_line: int,
         end_line: int,
-        change_type: str = "modification",
+        change_type: Literal["addition", "modification", "deletion"] = "modification",
     ) -> bool:
         """Apply a YAML change to a file based on change_type.
 

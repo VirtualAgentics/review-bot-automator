@@ -13,7 +13,7 @@ import tempfile
 import warnings
 from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from review_bot_automator.core.models import Change, Conflict
 from review_bot_automator.handlers.base import BaseHandler
@@ -91,7 +91,7 @@ class TomlHandler(BaseHandler):
         content: str,
         start_line: int,
         end_line: int,
-        change_type: str = "modification",
+        change_type: Literal["addition", "modification", "deletion"] = "modification",
     ) -> bool:
         """Apply a TOML change to the file based on change_type.
 
